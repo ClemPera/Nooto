@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useGeneral } from "../store/general";
 import { invoke } from "@tauri-apps/api/core";
 import { info } from "@tauri-apps/plugin-log";
 
 enum SyncStatus {
-  Ok,
-  Syncing,
-  Error,
+  Ok = "Ok",
+  Syncing = "Synching",
+  Error = "Error",
 }
 
 export default function Sync() {
@@ -28,10 +28,16 @@ export default function Sync() {
       })
       .catch((e) => console.error(e));
   }
-  
-  async function sync() {
-    //TODO
-  }
+
+  useEffect(() => {
+    let interval = setInterval(async () => {
+      console.log("looping:", logged);
+      
+    },1000);
+
+    return () => clearInterval(interval);
+  }, [logged]);
+
 
   return (
     <div>
@@ -39,8 +45,7 @@ export default function Sync() {
       <button className="h-10 w-min p-2 bg-yellow-600 cursor-pointer" onClick={create_account}>create_account</button>
       <button className="h-10 w-min p-2 bg-blue-600 cursor-pointer" onClick={login}>login</button>
 
-      {logged ?? <div>
-        <button className="h-10 w-min p-2 bg-green-600 cursor-pointer" onClick={sync}>sync_notes</button>
+      {logged && <div>
         <p>Sync status: {syncStatus}</p>
       </div>}
 
