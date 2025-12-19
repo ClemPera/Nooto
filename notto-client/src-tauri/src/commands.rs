@@ -57,12 +57,15 @@ impl From<Note> for NoteMetadata {
 
 #[tauri::command]
 pub async fn init(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError>  {
-    let state = state.lock().await;
+    let mut state = state.lock().await;
 
-    let conn = state.database.lock().await;
+    let user = {
+        let conn = state.database.lock().await;
+        db::operations::get_logged_user(&conn)
+    };
 
-    db::operations::init(&conn);
-    
+    state.user = user;
+
     Ok(())
 }
 
@@ -151,21 +154,45 @@ pub async fn test(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError>
 }
 
 #[tauri::command]
-pub async fn set_user(state: State<'_, Mutex<AppState>>, username: String) -> Result<(), CommandError> {
+pub async fn set_logged_user(state: State<'_, Mutex<AppState>>, username: String) -> Result<(), CommandError> {
     let mut state = state.lock().await;
     
-    let user = {
-        let conn = state.database.lock().await;
-        match db::operations::get_user(&conn, username).unwrap() {
-            Some(u) => u,
-            None => return Err(CommandError { message: "User doesn't exist".to_string() })
-        }
+    let user = match username.is_empty() {
+        false => {
+            let user = {
+                let conn = state.database.lock().await;
+                match db::operations::get_user(&conn, username).unwrap() {
+                    Some(u) => u,
+                    None => return Err(CommandError { message: "User doesn't exist".to_string() })
+                }
+            };
+        
+            Some(user)
+        },
+        true => None
     };
 
-    state.user = Some(user);
+    state.user = user.clone();
+
+    let conn = state.database.lock().await;
+    db::operations::set_logged_user(&conn, user);
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn get_logged_user(state: State<'_, Mutex<AppState>>) -> Result<Option<FilteredUser>, CommandError> {
+    let state = state.lock().await;
+
+    match &state.user {
+        Some(u) => Ok(Some(FilteredUser {
+            id: u.id.unwrap(),
+            username: u.username.clone()
+        })),
+        None => Ok(None)
+    }
+}
+
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn sync_create_account(state: State<'_, Mutex<AppState>>, username: String, password: String, instance: Option<String>) -> Result<(), CommandError> {

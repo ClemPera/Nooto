@@ -1,10 +1,12 @@
+use core::panic;
+
 use aes_gcm::{Aes256Gcm, Key};
 use chrono::{DateTime, Local, NaiveDateTime};
 use rusqlite::Connection;
 use serde::Serialize;
 use tauri_plugin_log::log::{debug, trace};
 
-use crate::{crypt::{self, NoteData}, db::schema::{Note, User}};
+use crate::{crypt::{self, NoteData}, db::schema::{Common, Note, User}};
 
 //TODO: refactor this, data encryption and stuff should not be inside db?
 pub fn create_note(conn: &Connection, id_user: u32, title: String, mek: Key<Aes256Gcm>) -> Result<(), Box<dyn std::error::Error>> {
@@ -96,6 +98,37 @@ pub fn get_users(conn: &Connection) -> Result<Vec<User>, Box<dyn std::error::Err
     Ok(users)
 }
 
-/// Execute when frontend load for the first time
-pub fn init(conn: &Connection) {
+pub fn set_logged_user(conn: &Connection, user: Option<User>) {
+    match user {
+        Some(user) => {
+            match Common::select(conn, "logged".to_string()).unwrap() {
+                Some(mut common) => {
+                        common.value = user.username;
+        
+                        common.update(conn).unwrap();
+                    },
+        
+                None => {
+                    let common = Common {
+                        key: "logged".to_string(),
+                        value: user.username,
+                    };
+                    
+                    common.insert(conn).unwrap();
+                },
+            }
+        },
+        None => {
+            Common::delete(conn, "logged".to_string());
+        }
+    }
+}
+
+pub fn get_logged_user(conn: &Connection) -> Option<User> {
+    match Common::select(conn, "logged".to_string()).unwrap() {
+        Some(lu) => {
+            Some(User::select(conn, lu.value).unwrap().unwrap())
+        },
+        None => None,
+    }
 }

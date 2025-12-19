@@ -46,7 +46,7 @@ export default function CreateAccount() {
       await invoke("create_user", { username });
 
       // Set the user
-      await invoke("set_user", { username });
+      await invoke("set_logged_user", { username });
 
       // Create account on server
       await invoke("sync_create_account", {

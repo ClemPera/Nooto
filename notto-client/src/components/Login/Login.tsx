@@ -30,7 +30,7 @@ export default function Login() {
       }
 
       // Set the user
-      await invoke("set_user", { username });
+      await invoke("set_logged_user", { username });
 
       // Login to server
       const success = await invoke("sync_login", {

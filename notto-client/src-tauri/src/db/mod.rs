@@ -18,6 +18,7 @@ pub fn init(db_path: PathBuf) -> Result<Mutex<Connection>, Box<dyn std::error::E
     // Create tables
     schema::Note::create(&conn)?;
     schema::User::create(&conn)?;
+    schema::Common::create(&conn)?;
     trace!("Tables have been created correctly");
 
     Ok(Mutex::new(conn))

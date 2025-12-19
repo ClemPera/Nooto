@@ -246,3 +246,61 @@ impl User {
         Ok(())
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct Common {
+    pub key: String,
+    pub value: String
+}
+
+impl Common {
+    pub fn create(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        conn.execute(
+        "CREATE TABLE IF NOT EXISTS common (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )", 
+            (), // empty list of parameters.
+        ).unwrap();
+
+        Ok(())
+    }
+
+    pub fn insert(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        conn.execute(
+            "INSERT INTO common (key, value) VALUES (?1, ?2)", 
+            (&self.key, &self.value)
+        ).unwrap();
+
+        Ok(())
+    }
+
+    pub fn update(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        conn.execute("UPDATE note SET value = ? WHERE key = ?",
+            (&self.value, &self.key))?;
+
+        Ok(())
+    }
+
+    pub fn select(conn: &Connection, key: String) -> Result<Option<Self>, Box<dyn std::error::Error>> {
+        let value = match conn.query_one("SELECT value FROM common WHERE key = ?", 
+            (key.clone(), ), 
+            |row| {
+                Ok(Common{
+                    key,
+                    value: row.get(0)?
+                })
+            }
+        ) {
+            Ok(v) => Some(v),
+            Err(e) if e == QueryReturnedNoRows => None,
+            Err(e) => return Err(e.into())
+        };
+
+        Ok(value)
+    }
+
+    pub fn delete(conn: &Connection, key: String) {
+        conn.execute("DELETE FROM common WHERE key = ?", (key, )).unwrap();
+    }
+}

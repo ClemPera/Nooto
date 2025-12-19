@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useGeneral } from "../store/general";
 
-type User = {
+export type User = {
   id: number;
   username: string;
 };
@@ -25,7 +25,7 @@ export default function AccountMenu() {
 
       // Find current user (TODO: in a real app, you'd store the current username properly)
       if (users.length > 0 && userId) {
-        setCurrentUser(users[0]); // For now, just use first user
+        setCurrentUser(users[0]); // TODO: For now, just use first user
       }
     } catch (e) {
       console.error("Failed to load users:", e);
@@ -34,7 +34,7 @@ export default function AccountMenu() {
 
   async function switchAccount(username: string) {
     try {
-      await invoke("set_user", { username });
+      await invoke("set_logged_user", { username });
       setShowUserMenu(false);
       // Refresh the app - TODO: you might want to reload or update state here
       window.location.reload();
@@ -50,7 +50,9 @@ export default function AccountMenu() {
   function handleLogout() {
     // Clear user session
     setUserId(null);
-    // TODO: In a real app, you'd also clear tokens and encrypted data from memory
+    invoke("set_logged_user", { username: "" }).catch((e) => console.error(e));
+
+    // TODO: Also clear tokens and encrypted data from memory
   }
 
   return (

@@ -1,4 +1,4 @@
-use std::{env, result};
+use std::{env};
 
 use axum::{
     Json, Router,
