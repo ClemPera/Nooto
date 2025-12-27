@@ -7,7 +7,7 @@ use shared::{SelectNoteParams, SentNotes};
 use tokio::sync::{Mutex, MutexGuard};
 
 use tauri::{AppHandle, Manager};
-use tauri_plugin_log::log::{debug, trace, error};
+use tauri_plugin_log::log::{debug, error, trace, warn};
 
 use crate::{AppState, db::{self, schema::Note}, sync};
 
@@ -27,8 +27,37 @@ pub async fn run(handle: AppHandle) {
                     let sync = Local::now().to_utc().timestamp();
     
                     //Sync
-                    receive_latest_notes(&state, last_sync).await;
-                    send_latest_notes(&state).await;
+                    match receive_latest_notes(&state, last_sync).await {
+                        Ok(_) => {},
+                        Err(e) => {
+                            if let Some(e) = e.downcast_ref::<reqwest::Error>() {
+                                if e.is_connect() {
+                                    warn!("Couldn't connect to server");
+                                }
+                                else{
+                                    panic!("{e}")
+                                }
+                            }else{
+                                panic!("{e}")
+                            }
+                        }
+                    };
+
+                    match send_latest_notes(&state).await {
+                        Ok(_) => {},
+                        Err(e) => {
+                            if let Some(e) = e.downcast_ref::<reqwest::Error>() {
+                                if e.is_connect() {
+                                    warn!("Couldn't connect to server");
+                                }
+                                else{
+                                    panic!("{e}")
+                                }
+                            }else{
+                                panic!("{e}")
+                            }
+                        }
+                    };
     
                     last_sync = sync;
                 }else {
@@ -42,7 +71,7 @@ pub async fn run(handle: AppHandle) {
 }
 
 
-pub async fn receive_latest_notes(state: &MutexGuard<'_, AppState>, last_sync: i64) {
+pub async fn receive_latest_notes(state: &MutexGuard<'_, AppState>, last_sync: i64) -> Result<(), Box<dyn std::error::Error>> {
     let conn = state.database.lock().await;
     
     let user = state.user.clone().unwrap();
@@ -54,7 +83,7 @@ pub async fn receive_latest_notes(state: &MutexGuard<'_, AppState>, last_sync: i
     };
     
     //Ask server for modified notes
-    let notes = sync::operations::select_notes(params, user.instance.unwrap()).await.unwrap();
+    let notes = sync::operations::select_notes(params, user.instance.unwrap()).await?;
 
     trace!("notes received : {notes:?}");
 
@@ -81,9 +110,11 @@ pub async fn receive_latest_notes(state: &MutexGuard<'_, AppState>, last_sync: i
 
         //TODO: if deleted
     });
+
+    Ok(())
 }
 
-pub async fn send_latest_notes(state: &MutexGuard<'_, AppState>) {
+pub async fn send_latest_notes(state: &MutexGuard<'_, AppState>) -> Result<(), Box<dyn std::error::Error>> {
     let conn = state.database.lock().await;
 
     let user = state.user.clone().unwrap();
@@ -101,7 +132,7 @@ pub async fn send_latest_notes(state: &MutexGuard<'_, AppState>) {
     };
 
     //Send server these notes
-    let results = sync::operations::send_notes(sent_notes, user.instance.unwrap()).await.unwrap();
+    let results = sync::operations::send_notes(sent_notes, user.instance.unwrap()).await?;
 
     //Handle Results
     results.into_iter().for_each(|result| {
@@ -120,4 +151,6 @@ pub async fn send_latest_notes(state: &MutexGuard<'_, AppState>) {
             }
         }
     });
+    
+    Ok(())
 }

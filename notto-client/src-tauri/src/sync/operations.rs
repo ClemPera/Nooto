@@ -4,7 +4,7 @@ use tauri_plugin_log::log::{trace, debug};
 pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared::SentNotesResult>, Box<dyn std::error::Error>> {
     let client = reqwest::Client::new();
 
-    let response = client.post(instance + "/note").json(&notes).send().await.unwrap().error_for_status()?;
+    let response = client.post(instance + "/note").json(&notes).send().await?.error_for_status()?;
 
     return Ok(response.json().await.unwrap())
 }
@@ -12,7 +12,7 @@ pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared
 pub async fn select_notes(params: SelectNoteParams, instance: String) -> Result<Vec<Note>, Box<dyn std::error::Error>> {
     let client = reqwest::Client::new();
 
-    let response = client.get(instance + "/note").query(&params).send().await.unwrap().error_for_status()?;
+    let response = client.get(instance + "/note").query(&params).send().await?.error_for_status()?;
 
     Ok(response.json().await.unwrap())
 }

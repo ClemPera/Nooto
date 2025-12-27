@@ -13,7 +13,7 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
 
   async function handleLogin() {
-    if (!username || !password) {
+    if (!username || !password || !instance) {
       setError("Please fill in all fields");
       return;
     }
@@ -26,6 +26,7 @@ export default function Login() {
       const users = await invoke("get_users") as User[];
       const userExists = users.some(u => u.username === username);
 
+      //TODO: not sure about that here?
       if (!userExists) {
         await invoke("create_user", { username });
       }
@@ -37,7 +38,7 @@ export default function Login() {
       const success = await invoke("sync_login", {
         username,
         password,
-        instance: instance || undefined
+        instance
       }) as boolean;
 
       if (success) {
