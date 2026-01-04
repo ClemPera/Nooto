@@ -55,158 +55,158 @@ impl From<Note> for NoteMetadata {
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn init(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError>  {
     let mut state = state.lock().await;
 
-    let user = {
+    let workspace = {
         let conn = state.database.lock().await;
-        db::operations::get_logged_user(&conn)
+        db::operations::get_logged_workspace(&conn)
     };
 
-    state.user = user;
-
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn create_note(state: State<'_, Mutex<AppState>>, title: String) -> Result<(), CommandError> {
-    let state = state.lock().await;
-
-    let conn = state.database.lock().await;
-
-    let user = state.user.clone().unwrap();
-
-    db::operations::create_note(&conn, user.id.unwrap(), title, user.master_encryption_key).unwrap();
-
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn get_note(state: State<'_, Mutex<AppState>>, id: u32) -> Result<NoteData, CommandError> {
-    let state = state.lock().await;
-
-    let conn = state.database.lock().await;
-    
-    let note = db::operations::get_note(&conn, id, state.user.clone().unwrap().master_encryption_key).unwrap();
-
-    Ok(note)
-}
-
-#[tauri::command]
-pub async fn edit_note(state: State<'_, Mutex<AppState>>, note: NoteData) -> Result<(), CommandError> {
-    let state = state.lock().await;
-
-    let conn = state.database.lock().await;
-
-    db::operations::update_note(&conn, note, state.user.clone().unwrap().master_encryption_key).unwrap();
+    state.workspace = workspace;
 
     Ok(())
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn get_all_notes_metadata(state: State<'_, Mutex<AppState>>, id_user: u32) -> Result<Vec<NoteMetadata>, CommandError> {    
+pub async fn create_note(state: State<'_, Mutex<AppState>>, title: String) -> Result<(), CommandError> {
     let state = state.lock().await;
 
     let conn = state.database.lock().await;
 
-    let notes = db::operations::get_notes(&conn, id_user).unwrap();
+    let workspace = state.workspace.clone().unwrap();
+
+    db::operations::create_note(&conn, workspace.id.unwrap(), title, workspace.master_encryption_key).unwrap();
+
+    Ok(())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_note(state: State<'_, Mutex<AppState>>, id: u32) -> Result<NoteData, CommandError> {
+    let state = state.lock().await;
+
+    let conn = state.database.lock().await;
+    
+    let note = db::operations::get_note(&conn, id, state.workspace.clone().unwrap().master_encryption_key).unwrap();
+
+    Ok(note)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn edit_note(state: State<'_, Mutex<AppState>>, note: NoteData) -> Result<(), CommandError> {
+    let state = state.lock().await;
+
+    let conn = state.database.lock().await;
+
+    db::operations::update_note(&conn, note, state.workspace.clone().unwrap().master_encryption_key).unwrap();
+
+    Ok(())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_all_notes_metadata(state: State<'_, Mutex<AppState>>, id_workspace: u32) -> Result<Vec<NoteMetadata>, CommandError> {    
+    let state = state.lock().await;
+
+    let conn = state.database.lock().await;
+
+    let notes = db::operations::get_notes(&conn, id_workspace).unwrap();
 
     let notes_metadata = notes.into_iter().map(NoteMetadata::from).collect();
     
     Ok(notes_metadata)
 }
 
-#[tauri::command]
-pub async fn create_user(state: State<'_, Mutex<AppState>>, username: String) -> Result<(), CommandError> {
+#[tauri::command(rename_all = "snake_case")]
+pub async fn create_workspace(state: State<'_, Mutex<AppState>>, username: String) -> Result<(), CommandError> {
     let mut state = state.lock().await;
 
-    let user = {
+    let workspace = {
         let conn = state.database.lock().await;
-        db::operations::create_user(&conn, username).unwrap()
+        db::operations::create_workspace(&conn, username).unwrap()
     };
 
-    state.user = Some(user);
+    state.workspace = Some(workspace);
 
     debug!("user created");
     
     Ok(())
 }
 
-#[tauri::command]
-pub async fn get_users(state: State<'_, Mutex<AppState>>) -> Result<Vec<FilteredWorkspace>, CommandError> {
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_workspaces(state: State<'_, Mutex<AppState>>) -> Result<Vec<FilteredWorkspace>, CommandError> {
     let state = state.lock().await;
 
     let conn = state.database.lock().await;
     
-    let workspaces = db::operations::get_users(&conn).unwrap();
+    let workspaces = db::operations::get_workspaces(&conn).unwrap();
 
     let filtered_worspaces = workspaces.into_iter().map(FilteredWorkspace::from).collect();
 
     Ok(filtered_worspaces)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn test(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
     let state = state.lock().await;
     
     Ok(())
 }
 
-#[tauri::command]
-pub async fn set_logged_user(state: State<'_, Mutex<AppState>>, username: String) -> Result<FilteredWorkspace, CommandError> {
+#[tauri::command(rename_all = "snake_case")]
+pub async fn set_logged_workspace(state: State<'_, Mutex<AppState>>, workspace_name: String) -> Result<FilteredWorkspace, CommandError> {
     let mut state = state.lock().await;
     
-    let workspace = match username.is_empty() {
+    let workspace = match workspace_name.is_empty() {
         false => {
             let workspace = {
                 let conn = state.database.lock().await;
-                match db::operations::get_user(&conn, username).unwrap() {
+                match db::operations::get_workspace(&conn, workspace_name).unwrap() {
                     Some(u) => u,
                     None => return Err(CommandError { message: "Workspace doesn't exist".to_string() })
                 }
             };
         
-            Some(user)
+            Some(workspace)
         },
         true => None
     };
 
-    state.user = user.clone();
+    state.workspace = workspace.clone();
 
     let conn = state.database.lock().await;
-    db::operations::set_logged_user(&conn, user.clone());
+    db::operations::set_logged_workspace(&conn, workspace.clone());
 
-    let user = user.unwrap();
+    let workspace = workspace.unwrap();
     
-    Ok(FilteredUser { id: user.id.unwrap(), username: user.username })
+    Ok(FilteredWorkspace { id: workspace.id.unwrap(), workspace_name: workspace.workspace_name })
 }
 
-#[tauri::command]
-pub async fn get_logged_user(state: State<'_, Mutex<AppState>>) -> Result<Option<FilteredUser>, CommandError> {
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_logged_workspace(state: State<'_, Mutex<AppState>>) -> Result<Option<FilteredWorkspace>, CommandError> {
     let state = state.lock().await;
 
-    match &state.user {
-        Some(u) => Ok(Some(FilteredUser {
-            id: u.id.unwrap(),
-            username: u.username.clone()
+    match &state.workspace {
+        Some(w) => Ok(Some(FilteredWorkspace {
+            id: w.id.unwrap(),
+            workspace_name: w.workspace_name.clone()
         })),
         None => Ok(None)
     }
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn sync_create_account(state: State<'_, Mutex<AppState>>, username: String, password: String, instance: Option<String>) -> Result<(), CommandError> {
+pub async fn sync_create_account(state: State<'_, Mutex<AppState>>, worspace_name: String, password: String, instance: Option<String>) -> Result<(), CommandError> {
     trace!("create account command received");
     
     let mut state = state.lock().await;
     
     let conn = state.database.lock().await;
-    let user = db::operations::get_user(&conn, username).unwrap().unwrap();
-    let account = crypt::create_account(password, state.user.clone().unwrap().master_encryption_key);
+    let workspace = db::operations::get_workspace(&conn, worspace_name).unwrap().unwrap();
+    let account = crypt::create_account(password, state.workspace.clone().unwrap().master_encryption_key);
     
     trace!("create account: start creating");
-    sync::create_account(user, account, instance).await;
+    sync::create_account(workspace, account, instance).await;
     
     debug!("account has been created");
 
@@ -216,7 +216,7 @@ pub async fn sync_create_account(state: State<'_, Mutex<AppState>>, username: St
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn sync_login(state: State<'_, Mutex<AppState>>, username: String, password: String, instance: Option<String>) -> Result<(), CommandError> {
+pub async fn sync_login(state: State<'_, Mutex<AppState>>, username: String, workspace_name: String, password: String, instance: Option<String>) -> Result<(), CommandError> {
     trace!("login command received");
 
     let mut state = state.lock().await;
@@ -230,48 +230,48 @@ pub async fn sync_login(state: State<'_, Mutex<AppState>>, username: String, pas
 
     debug!("account has been logged in");
 
-    let mut user = {
+    let mut workspace = {
         let conn = state.database.lock().await;
-        db::operations::create_user(&conn, username.clone()).unwrap();
-        db::operations::get_user(&conn, username).unwrap().unwrap()
+        db::operations::create_workspace(&conn, workspace_name.clone()).unwrap();
+        db::operations::get_workspace(&conn, workspace_name).unwrap().unwrap()
     };
 
-    trace!("create user = ok");
+    trace!("create workspace = ok");
 
     let mek = crypt::decrypt_mek(password, login_data.encrypted_mek_password, login_data.salt_data, login_data.mek_password_nonce);
 
     trace!("mek decrypted");
     
-    user.master_encryption_key = mek;
-    user.token = Some(login_data.token.clone());
-    user.instance = Some(instance.clone());
+    workspace.master_encryption_key = mek;
+    workspace.token = Some(login_data.token.clone());
+    workspace.instance = Some(instance.clone());
 
-    state.user = Some(user.clone());
+    state.workspace = Some(workspace.clone());
 
     trace!("state modified: {state:?}");
 
     {
         let conn = state.database.lock().await;
-        db::operations::update_user(&conn, user);
+        db::operations::update_workspace(&conn, workspace);
     }
 
-    trace!("user modified");
+    trace!("workspace modified");
 
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
     let mut state = state.lock().await;
     
     {
         let conn = state.database.lock().await;
-        let user = state.user.clone().unwrap();
+        let workspace = state.workspace.clone().unwrap();
     
-        db::operations::logout_user(&conn, user.username);
+        db::operations::logout_workspace(&conn, workspace.workspace_name);
     }
 
-    state.user = None;
+    state.workspace = None;
 
     Ok(())
 }

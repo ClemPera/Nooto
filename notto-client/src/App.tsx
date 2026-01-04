@@ -13,7 +13,7 @@ function App() {
   useEffect(() => {
     // Initialize the database on app start
     invoke("init").catch((e) => console.error(e));
-    invoke("get_logged_user").then((u) => u as User | null).then((u) => {
+    invoke("get_logged_workspace").then((u) => u as User | null).then((u) => {
       if (u) {
         setUser(u);
       };
@@ -26,7 +26,7 @@ function App() {
 
   async function loadUsers() {
     try {
-      const users = await invoke("get_users") as User[];
+      const users = await invoke("get_workspaces") as User[];
       setAllUsers(users);
 
     } catch (e) {

@@ -32,7 +32,7 @@ export default function Login() {
         console.error("login failed:", e);
       });
 
-      await invoke("get_logged_user").then((u) => u as User | null).then((u) => {
+      await invoke("get_logged_workspace").then((u) => u as User | null).then((u) => {
         if (u) {
           setUser(u);
         };

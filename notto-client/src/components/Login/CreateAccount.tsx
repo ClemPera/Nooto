@@ -34,7 +34,7 @@ export default function CreateAccount() {
 
     try {
       // Check if user already exists locally
-      const users = await invoke("get_users") as Array<{ id: number; username: string }>;
+      const users = await invoke("get_workspaces") as Array<{ id: number; username: string }>;
       const userExists = users.some(u => u.username === username);
 
       if (userExists) {
@@ -44,10 +44,10 @@ export default function CreateAccount() {
       }
 
       // Create local user
-      await invoke("create_user", { username });
+      await invoke("create_workspace", { username });
 
       // Set the user
-      await invoke("set_logged_user", { username });
+      await invoke("set_logged_workspace", { username });
 
       // Create account on server
       // await invoke("sync_create_account", {
@@ -63,7 +63,7 @@ export default function CreateAccount() {
       //   instance: instance || undefined
       // }) as boolean;
 
-      invoke("get_logged_user").then((u) => u as User | null).then((u) => {
+      invoke("get_logged_workspace").then((u) => u as User | null).then((u) => {
         if (u) {
           setUser(u);
         };

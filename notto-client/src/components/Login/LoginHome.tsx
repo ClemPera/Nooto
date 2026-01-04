@@ -11,7 +11,7 @@ export default function LoginHome() {
 
   async function handleLogBack(user: User) {
     setUser(user)
-    await invoke("set_logged_user", { username: user.username });
+    await invoke("set_logged_workspace", { username: user.username });
   }
 
   return (

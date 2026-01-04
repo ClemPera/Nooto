@@ -13,7 +13,7 @@ export default function AccountMenu() {
 
   async function switchAccount(username: string) {
     try {
-      const user = await invoke("set_logged_user", { username }) as User;
+      const user = await invoke("set_logged_workspace", { username }) as User;
       setUser(user);
       setShowUserMenu(false);
       
@@ -25,7 +25,7 @@ export default function AccountMenu() {
 
   function addAccount() {
     setUser(null);
-    invoke("set_logged_user", { username: "" }).catch((e) => console.error(e));
+    invoke("set_logged_workspace", { username: "" }).catch((e) => console.error(e));
   }
   return (
     <div className="border-t border-slate-700 bg-slate-800/50">

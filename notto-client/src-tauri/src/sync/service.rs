@@ -21,8 +21,8 @@ pub async fn run(handle: AppHandle) {
         {
             let state = state.lock().await;
 
-            if let Some(user) = state.user.clone() {
-                if user.id.is_some() && user.token.is_some() && user.instance.is_some() {
+            if let Some(workspace) = state.workspace.clone() {
+                if workspace.id.is_some() && workspace.token.is_some() && workspace.instance.is_some() {
                     //Update sync infos
                     let sync = Local::now().to_utc().timestamp();
     
@@ -74,23 +74,23 @@ pub async fn run(handle: AppHandle) {
 pub async fn receive_latest_notes(state: &MutexGuard<'_, AppState>, last_sync: i64) -> Result<(), Box<dyn std::error::Error>> {
     let conn = state.database.lock().await;
     
-    let user = state.user.clone().unwrap();
+    let workspace = state.workspace.clone().unwrap();
 
     let params = SelectNoteParams {
-        username: user.username,
-        token: hex::encode(user.token.unwrap()), 
+        username: workspace.username.unwrap(),
+        token: hex::encode(workspace.token.unwrap()), 
         updated_at: last_sync
     };
     
     //Ask server for modified notes
-    let notes = sync::operations::select_notes(params, user.instance.unwrap()).await?;
+    let notes = sync::operations::select_notes(params, workspace.instance.unwrap()).await?;
 
     trace!("notes received : {notes:?}");
 
     // Put new notes to database
     notes.into_iter().for_each(|note| {
         let mut note = db::schema::Note::from(note);
-        note.id_user = user.id;
+        note.id_workspace = workspace.id;
         
         //Check if exist
         let selected_note = db::schema::Note::select(&conn, note.id.unwrap()).unwrap();
@@ -117,22 +117,22 @@ pub async fn receive_latest_notes(state: &MutexGuard<'_, AppState>, last_sync: i
 pub async fn send_latest_notes(state: &MutexGuard<'_, AppState>) -> Result<(), Box<dyn std::error::Error>> {
     let conn = state.database.lock().await;
 
-    let user = state.user.clone().unwrap();
+    let workspace = state.workspace.clone().unwrap();
     
     //Fetch db find all notes with synched = false;
-    let notes = Note::select_all(&conn, user.id.unwrap()).unwrap();
+    let notes = Note::select_all(&conn, workspace.id.unwrap()).unwrap();
 
     //TODO: Optimise that with a database query
     let notes: Vec<Note> = notes.into_iter().filter(|note| !note.synched).collect();
 
     let sent_notes = SentNotes {
-        username: user.username,
+        username: workspace.username.unwrap(),
         notes: notes.into_iter().map(|n| n.into()).collect(),
-        token: user.token.unwrap()
+        token: workspace.token.unwrap()
     };
 
     //Send server these notes
-    let results = sync::operations::send_notes(sent_notes, user.instance.unwrap()).await?;
+    let results = sync::operations::send_notes(sent_notes, workspace.instance.unwrap()).await?;
 
     //Handle Results
     results.into_iter().for_each(|result| {
