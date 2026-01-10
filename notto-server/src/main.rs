@@ -69,23 +69,21 @@ async fn send_note(State(pool): State<Pool>, Json(sent_notes): Json<shared::Sent
     for mut note in notes {
         note.id_user = Some(user.id.unwrap());
 
-        match note.id {
-            Some(_) => {
-                let selected_note = note.select(&mut conn).await;
+        match note.select(&mut conn).await {
+            Some(selected_note) => {
                 if selected_note.updated_at > note.updated_at {
-                    result.push(SentNotesResult { id_client: note.id_client, id_server: note.id.unwrap().into(), status: shared::NoteStatus::Conflict });
+                    result.push(SentNotesResult { uuid: note.uuid, status: shared::NoteStatus::Conflict });
                 }else{
                     note.update(&mut conn).await;
 
-                    result.push(SentNotesResult { id_client: note.id_client, id_server: note.id.unwrap(), status: shared::NoteStatus::Ok });
+                    result.push(SentNotesResult { uuid: note.uuid, status: shared::NoteStatus::Ok });
                 }
             },
             None => {
                 note.insert(&mut conn).await;
-
-                let note_id = conn.last_insert_id().unwrap();
-                result.push(SentNotesResult { id_client: note.id_client, id_server: note_id, status: shared::NoteStatus::Ok });
-            },
+                
+                result.push(SentNotesResult { uuid: note.uuid, status: shared::NoteStatus::Ok });
+            }
         }
     }
 

@@ -93,7 +93,7 @@ pub async fn receive_latest_notes(state: &MutexGuard<'_, AppState>, last_sync: i
         note.id_workspace = workspace.id;
         
         //Check if exist
-        let selected_note = db::schema::Note::select(&conn, note.id.unwrap()).unwrap();
+        let selected_note = db::schema::Note::select(&conn, note.uuid.clone()).unwrap();
 
         match selected_note {
             Some(sn) => {
@@ -101,7 +101,7 @@ pub async fn receive_latest_notes(state: &MutexGuard<'_, AppState>, last_sync: i
                     //Note is more recent on server
                     match sn.synched {
                         true => note.update(&conn).unwrap(),
-                        false => error!("Note {:?} is in conflict and it's not handled :(", sn.id) //TODO
+                        false => error!("Note {:?} is in conflict and it's not handled :(", sn.uuid) //TODO
                     };
                 }
             },
@@ -138,16 +138,15 @@ pub async fn send_latest_notes(state: &MutexGuard<'_, AppState>) -> Result<(), B
     results.into_iter().for_each(|result| {
         match result.status {
             shared::NoteStatus::Ok => {
-                let mut note = Note::select(&conn, result.id_client).unwrap().unwrap();
+                let mut note = Note::select(&conn, result.uuid).unwrap().unwrap();
 
                 note.synched = true;
-                note.id_server = Some(result.id_server);
 
                 note.update(&conn).unwrap();
             },
             shared::NoteStatus::Conflict => {
                 //TODO
-                error!("Note {:?} is in conflict and it's not handled :(", result.id_client) 
+                error!("Note {:?} is in conflict and it's not handled :(", result.uuid) 
             }
         }
     });

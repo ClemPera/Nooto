@@ -3,6 +3,7 @@ use tokio::sync::Mutex;
 use serde::Serialize;
 use tauri::State;
 use tauri_plugin_log::log::{debug, trace};
+use uuid::Uuid;
 
 use crate::{AppState, crypt, sync};
 use crate::crypt::NoteData;
@@ -40,7 +41,7 @@ impl From<Workspace> for FilteredWorkspace {
 
 #[derive(Debug, Serialize)]
 pub struct NoteMetadata {
-    pub id: u32,
+    pub id: String,
     pub title: String,
     pub updated_at: i64,
 }
@@ -48,7 +49,7 @@ pub struct NoteMetadata {
 impl From<Note> for NoteMetadata {
     fn from(note: Note) -> Self {
         NoteMetadata {
-            id: note.id.unwrap(),
+            id: Uuid::from_slice(note.uuid.as_slice()).unwrap().to_string(),
             title: note.title,
             updated_at: note.updated_at*1000 //Convert to TS timestamps
         }
@@ -83,12 +84,12 @@ pub async fn create_note(state: State<'_, Mutex<AppState>>, title: String) -> Re
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn get_note(state: State<'_, Mutex<AppState>>, id: u32) -> Result<NoteData, CommandError> {
+pub async fn get_note(state: State<'_, Mutex<AppState>>, id: String) -> Result<NoteData, CommandError> {
     let state = state.lock().await;
 
     let conn = state.database.lock().await;
     
-    let note = db::operations::get_note(&conn, id, state.workspace.clone().unwrap().master_encryption_key).unwrap();
+    let note = db::operations::get_note(&conn, Uuid::parse_str(&id).unwrap().as_bytes().to_vec(), state.workspace.clone().unwrap().master_encryption_key).unwrap();
 
     Ok(note)
 }

@@ -32,6 +32,7 @@ bip39 = { version="2.2.0", features = ["rand"] }
 reqwest = { version = "0.12.24", features = ["json", "blocking"] }
 tokio = "1.48.0"
 hex = "0.4.3"
+uuid = { version = "1.19", features = ["v7"] }
 
 [lints.rust]
 unused_imports = "allow" #TODO: remove

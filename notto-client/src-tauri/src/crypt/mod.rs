@@ -15,7 +15,7 @@ use crate::db::schema;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NoteData {
-    pub id: u32,
+    pub uuid: Vec<u8>,
     pub title: String,
     pub content: String,
     pub updated_at: i64,
@@ -214,7 +214,7 @@ pub fn decrypt_note(note: schema::Note, mek: Key<Aes256Gcm>) -> Result<NoteData,
     let cipher = Aes256Gcm::new(&mek);
     let plaintext = cipher.decrypt(&nonce, note.content.as_ref()).unwrap();
     let data_unser = NoteData {
-        id: note.id.unwrap(),
+        uuid: note.uuid,
         title: note.title,
         content: String::from_utf8(plaintext).unwrap(),
         updated_at: note.updated_at

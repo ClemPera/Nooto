@@ -1,4 +1,3 @@
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use mysql_async::{
     Conn, FromRowError, Row, params,
     prelude::{FromRow, Queryable, WithParams},
@@ -7,8 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Note {
-    pub id: Option<u64>,
-    pub id_client: u32, //id of the note on client
+    pub uuid: Vec<u8>,
     pub id_user: Option<u32>, //Server id user
     pub title: String,
     pub content: Vec<u8>,
@@ -19,13 +17,12 @@ pub struct Note {
 impl FromRow for Note {
     fn from_row_opt(row: Row) -> Result<Self, FromRowError> {
         Ok(Note {
-            id: row.get(0).ok_or(FromRowError(row.clone()))?,
-            id_client: row.get(1).ok_or(FromRowError(row.clone()))?,
-            id_user: row.get(2).ok_or(FromRowError(row.clone()))?,
-            title: row.get(3).ok_or(FromRowError(row.clone()))?,
-            content: row.get(4).ok_or(FromRowError(row.clone()))?,
-            nonce: row.get(5).ok_or(FromRowError(row.clone()))?,
-            updated_at: row.get(6).ok_or(FromRowError(row.clone()))?,
+            uuid: row.get(0).ok_or(FromRowError(row.clone()))?,
+            id_user: row.get(1).ok_or(FromRowError(row.clone()))?,
+            title: row.get(2).ok_or(FromRowError(row.clone()))?,
+            content: row.get(3).ok_or(FromRowError(row.clone()))?,
+            nonce: row.get(4).ok_or(FromRowError(row.clone()))?,
+            updated_at: row.get(5).ok_or(FromRowError(row.clone()))?,
         })
     }
 }
@@ -33,8 +30,7 @@ impl FromRow for Note {
 impl From<shared::Note> for Note {
     fn from(note: shared::Note) -> Self {
         Note {
-            id: note.id_server,
-            id_client: note.id,
+            uuid: note.uuid,
             id_user: None,
             title: note.title,
             content: note.content,
@@ -47,8 +43,7 @@ impl From<shared::Note> for Note {
 impl Into<shared::Note> for Note {
     fn into(self) -> shared::Note {
         shared::Note {
-            id: self.id_client,
-            id_server: self.id,
+            uuid: self.uuid,
             content: self.content,
             nonce: self.nonce,
             title: self.title,
@@ -60,24 +55,23 @@ impl Into<shared::Note> for Note {
 impl Note {
     //TODO: pub async fn create(&self, conn: &mut Conn) {}
 
-    pub async fn select(&self, conn: &mut Conn) -> Self {
+    pub async fn select(&self, conn: &mut Conn) -> Option<Self> {
         conn.exec_first(
-            "SELECT * FROM note WHERE id = :id",
+            "SELECT * FROM note WHERE uuid = :uuid",
             params!(
-                "id" => &self.id
+                "uuid" => &self.uuid
             ),
         )
         .await
-        .unwrap()
         .unwrap()
     }
 
     pub async fn insert(&self, conn: &mut Conn) {
         conn.exec_drop(
-            "INSERT INTO note (id_client, id_user, title, content, nonce, updated_at) 
-            VALUES (:id_client, :id_user, :title, :content, :nonce, :updated_at)",
+            "INSERT INTO note (uuid, id_user, title, content, nonce, updated_at) 
+            VALUES (:uuid, :id_user, :title, :content, :nonce, :updated_at)",
             params!(
-                "id_client" => &self.id_client,
+                "uuid" => &self.uuid,
                 "id_user" => &self.id_user,
                 "title" => &self.title,
                 "content" => &self.content,
@@ -93,13 +87,13 @@ impl Note {
         conn.exec_drop(
             "UPDATE note 
             SET title = :title, content = :content, nonce = :nonce, updated_at = :updated_at 
-            WHERE id = :id",
+            WHERE uuid = :uuid",
             params!(
                 "title" => &self.title,
                 "content" => &self.content,
                 "nonce" => &self.nonce,
                 "updated_at" => &self.updated_at,
-                "id" => &self.id
+                "uuid" => &self.uuid
             ),
         )
         .await

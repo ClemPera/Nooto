@@ -9,8 +9,7 @@ use rusqlite::Error::QueryReturnedNoRows;
 
 #[derive(Debug)]
 pub struct Note {
-    pub id: Option<u32>,
-    pub id_server: Option<u64>,
+    pub uuid: Vec<u8>,
     pub id_workspace: Option<u32>,
     pub title: String,
     pub content: Vec<u8>, //Serialized encrypted content.
@@ -22,8 +21,7 @@ pub struct Note {
 impl From<shared::Note> for Note {
     fn from(note: shared::Note) -> Self {
         Note {
-            id: Some(note.id),
-            id_server: note.id_server,
+            uuid: note.uuid,
             id_workspace: None,
             title: note.title,
             content: note.content,
@@ -37,8 +35,7 @@ impl From<shared::Note> for Note {
 impl Into<shared::Note> for Note {
     fn into(self) -> shared::Note {
         shared::Note {
-            id: self.id.unwrap(),
-            id_server: self.id_server,
+            uuid: self.uuid,
             title: self.title,
             content: self.content,
             nonce: self.nonce,
@@ -51,8 +48,7 @@ impl Note {
     pub fn create(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         conn.execute(
         "CREATE TABLE IF NOT EXISTS note (
-                id INTEGER PRIMARY KEY,
-                id_server INTEGER,
+                uuid BLOB PRIMARY KEY,
                 id_workspace INTEGER NOT NULL REFERENCES workspace(id),
                 title TEXT,
                 content BLOB,
@@ -66,14 +62,13 @@ impl Note {
         Ok(())
     }
 
-    pub fn select(conn: &Connection, id: u32) -> Result<Option<Self>, Box<dyn std::error::Error>> {
+    pub fn select(conn: &Connection, uuid: Vec<u8>) -> Result<Option<Self>, Box<dyn std::error::Error>> {
         let note = match conn.query_one(
-            "SELECT * FROM note WHERE id = ?", 
-            (id,),
+            "SELECT * FROM note WHERE uuid = ?", 
+            (uuid,),
             |row| {
                 Ok(Note{
-                    id: row.get(0)?,
-                    id_server: row.get(1)?,
+                    uuid: row.get(0)?,
                     id_workspace: row.get(2)?,
                     title: row.get(3)?,
                     content: row.get(4)?,
@@ -92,16 +87,16 @@ impl Note {
 
     pub fn insert(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         conn.execute(
-            "INSERT INTO note (id_server, title, content, nonce, id_workspace, updated_at, synched) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
-            (&self.id_server, &self.title, &self.content, &self.nonce, &self.id_workspace, &self.updated_at, &self.synched)
+            "INSERT INTO note (uuid, title, content, nonce, id_workspace, updated_at, synched) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
+            (&self.uuid, &self.title, &self.content, &self.nonce, &self.id_workspace, &self.updated_at, &self.synched)
         ).unwrap();
 
         Ok(())
     }
 
     pub fn update(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
-        conn.execute("UPDATE note SET id_server = ?, title = ?, content = ?, nonce = ?, updated_at = ?, synched = ? WHERE id = ?",
-            (&self.id_server, &self.title, &self.content, &self.nonce, &self.updated_at, &self.synched, &self.id))?;
+        conn.execute("UPDATE note SET title = ?, content = ?, nonce = ?, updated_at = ?, synched = ? WHERE uuid = ?",
+            (&self.title, &self.content, &self.nonce, &self.updated_at, &self.synched, &self.uuid))?;
 
         Ok(())
     }
@@ -113,14 +108,13 @@ impl Note {
             [id_workspace,],
             |row| {
                 Ok(Note{
-                    id: row.get(0)?,
-                    id_server: row.get(1)?,
-                    id_workspace: row.get(2)?,
-                    title: row.get(3)?,
-                    content: row.get(4)?,
-                    nonce: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    synched: row.get(7)?,
+                    uuid: row.get(0)?,
+                    id_workspace: row.get(1)?,
+                    title: row.get(2)?,
+                    content: row.get(3)?,
+                    nonce: row.get(4)?,
+                    updated_at: row.get(5)?,
+                    synched: row.get(6)?,
                 })
             }
         ).unwrap();

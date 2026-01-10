@@ -5,6 +5,7 @@ use chrono::{DateTime, Local, NaiveDateTime};
 use rusqlite::Connection;
 use serde::Serialize;
 use tauri_plugin_log::log::{debug, trace};
+use uuid::{NoContext, Uuid};
 
 use crate::{crypt::{self, NoteData}, db::schema::{Common, Note, Workspace}};
 
@@ -13,8 +14,7 @@ pub fn create_note(conn: &Connection, id_workspace: u32, title: String, mek: Key
     let (content, nonce) = crypt::encrypt_note("".to_string(), mek).unwrap(); //Content empty because it's first note
 
     let note = Note {
-        id: None,
-        id_server: None,
+        uuid: Uuid::new_v7(uuid::Timestamp::now(NoContext)).as_bytes().to_vec(),
         id_workspace: Some(id_workspace),
         content,
         nonce,
@@ -28,8 +28,8 @@ pub fn create_note(conn: &Connection, id_workspace: u32, title: String, mek: Key
     Ok(())
 }
 
-pub fn get_note(conn: &Connection, id: u32, mek: Key<Aes256Gcm>) -> Result<NoteData, Box<dyn std::error::Error>> {
-    let note = Note::select(conn, id).unwrap().unwrap();
+pub fn get_note(conn: &Connection, uuid: Vec<u8>, mek: Key<Aes256Gcm>) -> Result<NoteData, Box<dyn std::error::Error>> {
+    let note = Note::select(conn, uuid).unwrap().unwrap();
 
     let decrypted_note = crypt::decrypt_note(note, mek).unwrap();
 
@@ -47,7 +47,7 @@ pub fn get_notes(conn: &Connection, id_workspace: u32) -> Result<Vec<Note>, Box<
 pub fn update_note(conn: &Connection, note_data: NoteData, mek: Key<Aes256Gcm>) -> Result<(), Box<dyn std::error::Error>> {
     let (content, nonce) = crypt::encrypt_note(note_data.content, mek).unwrap();
     
-    let mut note = Note::select(conn, note_data.id).unwrap().unwrap();
+    let mut note = Note::select(conn, note_data.uuid).unwrap().unwrap();
 
     note.title = note_data.title;
     note.content = content;
