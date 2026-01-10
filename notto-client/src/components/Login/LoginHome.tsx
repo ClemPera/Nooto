@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Login from "./Login";
 import CreateAccount from "./CreateAccount";
 import { useGeneral } from "../../store/general";
@@ -6,8 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Workspace } from "../AccountMenu";
 
 export default function LoginHome() {
-  const [view, setView] = useState<"login" | "create">("login");
-  const { workspace, setWorkspace, allWorkspaces, setAllWorkspaces } = useGeneral();
+  const { setWorkspace, allWorkspaces } = useGeneral();
 
   async function handleLogBack(workspace: Workspace) {
     setWorkspace(workspace)

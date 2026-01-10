@@ -8,7 +8,7 @@ import { Workspace } from "./components/AccountMenu";
 import LogoutConfirmModal from "./components/LogoutConfirmModal";
 
 function App() {
-  const { workspace, setWorkspace, allWorkspaces, setAllWorkspaces } = useGeneral();
+  const { workspace, setWorkspace, setAllWorkspaces } = useGeneral();
 
   useEffect(() => {
     // Initialize the database on app start

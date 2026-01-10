@@ -1,6 +1,5 @@
 import { create } from "zustand"
 import { Workspace } from "../components/AccountMenu"
-import { error } from "@tauri-apps/plugin-log"
 
 export enum syncStatusEnum {
   synced = "synced",
