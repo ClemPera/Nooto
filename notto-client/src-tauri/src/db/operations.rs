@@ -141,3 +141,13 @@ pub fn logout_workspace(conn: &Connection, workspace_name: String) {
 
     Common::delete(conn, "logged".to_string());
 }
+
+pub fn sync_logout_workspace(conn: &Connection, workspace_name: String) {
+    let mut workspace = Workspace::select(conn, workspace_name).unwrap().unwrap();
+
+    workspace.username = None;
+    workspace.token = None;
+    workspace.instance = None;
+
+    workspace.update(conn).unwrap();
+}

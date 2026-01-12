@@ -98,15 +98,14 @@ export default function AccountMenu() {
                   )) }
               </div>
             ) }
-            <div className="px-2 md:px-3 py-2 text-xs font-medium text-slate-400 uppercase">
-                  <button
-                    onClick={() => addAccount()}
-                    className="w-full px-2 md:px-3 py-2 flex items-center gap-2 md:gap-3 hover:bg-slate-700 transition-colors text-left"
-                  >
-                  <span className="text-xs md:text-sm text-white truncate">Add another account</span>
-                  </button>
+            <div className="py-1">
+              <button
+                onClick={() => addAccount()}
+                className="w-full px-2 md:px-3 py-2 flex items-center gap-2 md:gap-3 hover:bg-slate-700 transition-colors text-left"
+              >
+              <span className="text-xs md:text-sm text-white truncate">Add another account</span>
+              </button>
             </div>
-
 
             {/* Actions */}
             <div className="border-t border-slate-700 py-1">

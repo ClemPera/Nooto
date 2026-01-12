@@ -59,8 +59,8 @@ pub fn run() {
             commands::get_logged_workspace,
             commands::sync_create_account,
             commands::sync_login,
+            commands::sync_logout,
             commands::logout,
-            commands::test,
             ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

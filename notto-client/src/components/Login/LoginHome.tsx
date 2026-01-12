@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Workspace } from "../AccountMenu";
 
 export default function LoginHome() {
+  const [view, setView] = useState<"login" | "create">("login");
   const { setWorkspace, allWorkspaces } = useGeneral();
 
   async function handleLogBack(workspace: Workspace) {

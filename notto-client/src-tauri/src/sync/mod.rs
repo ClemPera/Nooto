@@ -6,7 +6,7 @@ use tauri_plugin_log::log::{trace, debug};
 mod operations;
 pub mod service;
 
-pub async fn create_account(workspace: Workspace, account: crypt::AccountEncryptionData, instance: Option<String>){
+pub async fn create_account(workspace: Workspace, username: String, account: crypt::AccountEncryptionData, instance: Option<String>){
     let instance = match instance {
         Some(i) => i,
         None => "http://localhost:3000".to_string()
@@ -14,7 +14,7 @@ pub async fn create_account(workspace: Workspace, account: crypt::AccountEncrypt
 
     let send_user = shared::User {
         id: None,
-        username: workspace.username.unwrap(),
+        username,
         stored_password_hash: account.stored_password_hash,
         stored_recovery_hash: account.stored_recovery_hash,
         encrypted_mek_password: account.encrypted_mek_password,

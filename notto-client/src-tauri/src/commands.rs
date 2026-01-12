@@ -148,13 +148,6 @@ pub async fn get_workspaces(state: State<'_, Mutex<AppState>>) -> Result<Vec<Fil
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn test(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
-    let state = state.lock().await;
-    
-    Ok(())
-}
-
-#[tauri::command(rename_all = "snake_case")]
 pub async fn set_logged_workspace(state: State<'_, Mutex<AppState>>, workspace_name: String) -> Result<FilteredWorkspace, CommandError> {
     let mut state = state.lock().await;
     
@@ -197,17 +190,20 @@ pub async fn get_logged_workspace(state: State<'_, Mutex<AppState>>) -> Result<O
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn sync_create_account(state: State<'_, Mutex<AppState>>, worspace_name: String, password: String, instance: Option<String>) -> Result<(), CommandError> {
+pub async fn sync_create_account(state: State<'_, Mutex<AppState>>, username: String, password: String, instance: Option<String>) -> Result<(), CommandError> {
+    //For now, login needs to be run after create_account
     trace!("create account command received");
     
-    let mut state = state.lock().await;
+    let state = state.lock().await;
+
+    let workspace = state.workspace.clone().ok_or_else(||
+        CommandError { message: "A workspace should have been loaded before creating an account".to_string() }
+    )?;
     
-    let conn = state.database.lock().await;
-    let workspace = db::operations::get_workspace(&conn, worspace_name).unwrap().unwrap();
-    let account = crypt::create_account(password, state.workspace.clone().unwrap().master_encryption_key);
+    let account = crypt::create_account(password, workspace.master_encryption_key);
     
     trace!("create account: start creating");
-    sync::create_account(workspace, account, instance).await;
+    sync::create_account(workspace, username, account, instance).await;
     
     debug!("account has been created");
 
@@ -217,49 +213,63 @@ pub async fn sync_create_account(state: State<'_, Mutex<AppState>>, worspace_nam
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn sync_login(state: State<'_, Mutex<AppState>>, username: String, workspace_name: String, password: String, instance: Option<String>) -> Result<(), CommandError> {
+pub async fn sync_login(state: State<'_, Mutex<AppState>>, username: String, password: String, instance: Option<String>) -> Result<(), CommandError> {
     trace!("login command received");
 
     let mut state = state.lock().await;
 
+    let mut workspace = state.workspace.clone().ok_or_else(||
+        CommandError { message: "A workspace should have been loaded before creating an account".to_string() }
+    )?;
+
     let instance = match instance {
         Some(i) => i,
-        None => "http://localhost:3000".to_string()
+        None => "http://localhost:3000".to_string() //TODO
     };
 
     let login_data = sync::login(username.clone(), password.clone(), instance.clone()).await;
 
     debug!("account has been logged in");
 
-    let mut workspace = {
-        let conn = state.database.lock().await;
-        db::operations::create_workspace(&conn, workspace_name.clone()).unwrap();
-        db::operations::get_workspace(&conn, workspace_name).unwrap().unwrap()
-    };
-
-    trace!("create workspace = ok");
-
     let mek = crypt::decrypt_mek(password, login_data.encrypted_mek_password, login_data.salt_data, login_data.mek_password_nonce);
 
     trace!("mek decrypted");
-    
-    workspace.master_encryption_key = mek;
-    workspace.token = Some(login_data.token.clone());
-    workspace.instance = Some(instance.clone());
-
-    state.workspace = Some(workspace.clone());
-
-    trace!("state modified: {state:?}");
 
     {
         let conn = state.database.lock().await;
-        db::operations::update_workspace(&conn, workspace);
+        db::operations::update_workspace(&conn, workspace.clone());
     }
+        
+    trace!("db workspace modified");
 
-    trace!("workspace modified");
+    workspace.master_encryption_key = mek;
+    workspace.token = Some(login_data.token);
+    workspace.instance = Some(instance);
+    state.workspace = Some(workspace);
+
+    trace!("state modified: {state:?}");
 
     Ok(())
 }
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
+    let mut state = state.lock().await;
+    let workspace = state.workspace.clone().unwrap();
+    
+    {
+        let conn = state.database.lock().await;
+        db::operations::sync_logout_workspace(&conn, workspace.workspace_name.clone());
+    }
+
+    state.workspace = {
+        let conn = state.database.lock().await;
+        db::operations::get_workspace(&conn, workspace.workspace_name).unwrap()
+    };
+
+    Ok(())
+}
+
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
