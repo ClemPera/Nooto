@@ -192,6 +192,7 @@ pub async fn get_logged_workspace(state: State<'_, Mutex<AppState>>) -> Result<O
 #[tauri::command(rename_all = "snake_case")]
 pub async fn sync_create_account(state: State<'_, Mutex<AppState>>, username: String, password: String, instance: Option<String>) -> Result<(), CommandError> {
     //For now, login needs to be run after create_account
+    
     trace!("create account command received");
     
     let state = state.lock().await;

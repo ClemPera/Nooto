@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { syncStatusEnum, useGeneral } from "../store/general";
+import { info } from "@tauri-apps/plugin-log";
 
 export type Workspace = {
   id: number;
@@ -23,9 +24,16 @@ export default function AccountMenu() {
     }
   }
 
-  function addAccount() {
-    setWorkspace(null);
-    invoke("set_logged_workspace", { workspace_name: "" }).catch((e) => console.error(e));
+  async function addWorkspace() {
+    let newName = "workspace " + (allWorkspaces.length+1)
+
+    await invoke("create_workspace", { workspace_name: newName }).catch((e) => console.error(e));
+    await invoke("get_logged_workspace").then((u) => u as Workspace | null).then((u) => {
+      if (u) {
+        setWorkspace(u);
+      };
+    }).catch((e) => console.error(e));
+
   }
   return (
     <div className="border-t border-slate-700 bg-slate-800/50">
@@ -75,7 +83,7 @@ export default function AccountMenu() {
 
         {/* Dropdown Menu */}
         {showWorkspaceMenu && (
-          <div className="absolute bottom-full left-0 right-0 mb-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
+          <div className="absolute bottom-full left-0 right-0 mb-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-y-scroll">
             {/* Other Workspaces */}
             {allWorkspaces.filter(u => u.workspace_name !== workspace?.workspace_name).length > 0 && (
               <div className="py-1">
@@ -100,10 +108,10 @@ export default function AccountMenu() {
             ) }
             <div className="py-1">
               <button
-                onClick={() => addAccount()}
+                onClick={() => addWorkspace()}
                 className="w-full px-2 md:px-3 py-2 flex items-center gap-2 md:gap-3 hover:bg-slate-700 transition-colors text-left"
               >
-              <span className="text-xs md:text-sm text-white truncate">Add another account</span>
+                <span className="text-xs md:text-sm text-white truncate">Add another account</span>
               </button>
             </div>
 

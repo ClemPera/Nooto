@@ -62,7 +62,7 @@ pub fn update_note(conn: &Connection, note_data: NoteData, mek: Key<Aes256Gcm>) 
 pub fn create_workspace(conn: &Connection, workspace_name: String) -> Result<Workspace, Box<dyn std::error::Error>> {
     let workspace_encryption_data = crypt::create_workspace();
 
-    let workspace = Workspace {
+    let mut workspace = Workspace {
         id: None,
         workspace_name,
         username: None,
@@ -75,6 +75,8 @@ pub fn create_workspace(conn: &Connection, workspace_name: String) -> Result<Wor
     };
 
     workspace.insert(&conn).unwrap();
+
+    workspace.id = Some(conn.last_insert_rowid() as u32);
 
     //TODO: send recovery keys to frontend
 
