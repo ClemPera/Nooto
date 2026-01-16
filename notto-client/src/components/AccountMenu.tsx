@@ -17,10 +17,9 @@ export default function AccountMenu() {
   const [showAuthMenu, setShowAuthMenu] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [serverAddress, setServerAddress] = useState("localhost:3000");
+  const [instance, setInstance] = useState("http://localhost:3000");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
@@ -73,7 +72,6 @@ export default function AccountMenu() {
 
   function resetAuthForm() {
     setUsername("");
-    setEmail("");
     setPassword("");
     setConfirmPassword("");
     setAuthError("");
@@ -88,7 +86,7 @@ export default function AccountMenu() {
   async function handleAuthSubmit() {
     setAuthError("");
 
-    if (!username || !email || !password) {
+    if (!username || !password) {
       setAuthError("Please fill in all fields");
       return;
     }
@@ -102,9 +100,9 @@ export default function AccountMenu() {
 
     try {
       if (authMode === "login") {
-        await invoke("login", { username, email, password, server_address: serverAddress });
+        await invoke("sync_login", { username, password, instance: instance });
       } else {
-        await invoke("register", { username, email, password, server_address: serverAddress });
+        await invoke("sync_create_account", { username ,password, instance: instance });
       }
       
       setShowAuthMenu(false);
@@ -116,6 +114,10 @@ export default function AccountMenu() {
     } finally {
       setAuthLoading(false);
     }
+  }
+
+  async function handleServerLogout() {
+    await invoke("sync_logout").catch((e) => console.error(e));
   }
 
   async function switchAccount(workspace_name: string) {
@@ -281,21 +283,6 @@ export default function AccountMenu() {
 
                     <div>
                       <label className="block text-xs font-medium text-slate-300 mb-1">
-                        Email
-                      </label>
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleAuthSubmit()}
-                        className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="your@email.com"
-                        disabled={authLoading}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1">
                         Password
                       </label>
                       <input
@@ -350,10 +337,10 @@ export default function AccountMenu() {
                           </label>
                           <input
                             type="text"
-                            value={serverAddress}
-                            onChange={(e) => setServerAddress(e.target.value)}
+                            value={instance}
+                            onChange={(e) => setInstance(e.target.value)}
                             className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            placeholder="localhost:3000"
+                            placeholder="http://localhost:3000"
                             disabled={authLoading}
                           />
                         </div>
@@ -410,7 +397,7 @@ export default function AccountMenu() {
                 </button>
                 :
                 <button
-                  // onClick={() => {setShowLogoutWorkspaceConfirm(true); setShowAccountMenu(false)}} //TODO
+                  onClick={handleServerLogout}
                   className="w-full px-2 md:px-3 py-2 text-xs md:text-sm text-red-400 hover:bg-slate-700 transition-colors text-left flex items-center gap-2"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

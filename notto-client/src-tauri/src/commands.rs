@@ -236,6 +236,11 @@ pub async fn sync_login(state: State<'_, Mutex<AppState>>, username: String, pas
 
     trace!("mek decrypted");
 
+    workspace.master_encryption_key = mek;
+    workspace.token = Some(login_data.token);
+    workspace.instance = Some(instance);
+    workspace.username = Some(username);
+
     {
         let conn = state.database.lock().await;
         db::operations::update_workspace(&conn, workspace.clone());
@@ -243,9 +248,7 @@ pub async fn sync_login(state: State<'_, Mutex<AppState>>, username: String, pas
         
     trace!("db workspace modified");
 
-    workspace.master_encryption_key = mek;
-    workspace.token = Some(login_data.token);
-    workspace.instance = Some(instance);
+    
     state.workspace = Some(workspace);
 
     trace!("state modified: {state:?}");

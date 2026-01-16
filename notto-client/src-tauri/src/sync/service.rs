@@ -76,7 +76,7 @@ pub async fn run(handle: AppHandle) {
                     
                     last_sync = sync;
                 }else {
-                    // trace!("Conditions are not respected to sync {state:?}");
+                    trace!("Conditions are not respected to sync {state:?}");
                     handle.emit("sync-status", SyncStatus::NotConnected).unwrap();
                 }
             }
