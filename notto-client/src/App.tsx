@@ -28,7 +28,6 @@ function App() {
         return [];
       });
 
-
     if (backend_workspaces.length <= 0) {
       // Create default workspace
       await invoke("create_workspace", { workspace_name: "workspace 1" })

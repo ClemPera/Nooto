@@ -137,14 +137,18 @@ export default function AccountMenu() {
     console.log("all workspaces are:", allWorkspaces);
     console.log("adding workspace:", allWorkspaces.length + 1)
 
+    //TODO
     let newName = "workspace " + (allWorkspaces.length + 1)
 
     await invoke("create_workspace", { workspace_name: newName }).catch((e) => console.error(e));
+    await invoke("set_logged_workspace", { workspace_name: newName });
     await invoke("get_logged_workspace").then((u) => u as Workspace | null).then((u) => {
       if (u) {
         setWorkspace(u);
       };
     }).catch((e) => console.error(e));
+
+    window.location.reload();
   }
 
   return (
