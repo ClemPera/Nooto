@@ -1,41 +1,41 @@
 import { create } from "zustand"
-import { User } from "../components/AccountMenu"
-import { error } from "@tauri-apps/plugin-log"
+import { Workspace } from "../components/AccountMenu"
 
 export enum syncStatusEnum {
-  synced = "synced",
-  syncing = "sincing",
-  error = "error",
-  offline = "offline"
+  Synched = "Synched",
+  Syncing = "Syncing", 
+  Error = "Error", 
+  Offline = "Offline",
+  NotConnected = "NotConnected"
 }
 
 type Store = {
-  user: User | null
-  allUsers: User[]
-  showLogoutConfirm: boolean
+  workspace: Workspace | null
+  allWorkspaces: Workspace[]
+  showLogoutWorkspaceConfirm: boolean
   syncStatus: syncStatusEnum
 
-  setUser: (newUser: User | null) => void
-  setAllUsers: (newUsers: User[]) => void
-  setShowLogoutConfirm: (confirm: boolean) => void
+  setWorkspace: (newWorkspace: Workspace | null) => void
+  setAllWorkspaces: (newWorkspaces: Workspace[]) => void
+  setShowLogoutWorkspaceConfirm: (confirm: boolean) => void
   setSyncStatus: (status: syncStatusEnum) => void
 }
 
 export const useGeneral = create<Store>(
   (set) => ({
-    user: null,
-    allUsers: [],
-    showLogoutConfirm: false,
-    syncStatus: syncStatusEnum.offline,
+    workspace: null,
+    allWorkspaces: [],
+    showLogoutWorkspaceConfirm: false,
+    syncStatus: syncStatusEnum.Offline,
 
-    setUser: (newUser) => {
-      set(() => ({ user: newUser }))
+    setWorkspace: (newWorkspace) => {
+      set(() => ({ workspace: newWorkspace }))
     },
-    setAllUsers: (newUsers) => {
-      set(() => ({ allUsers: newUsers }))
+    setAllWorkspaces: (newWorkspaces) => {
+      set(() => ({ allWorkspaces: newWorkspaces }))
     },
-    setShowLogoutConfirm: (confirm) => {
-      set(() => ({ showLogoutConfirm: confirm }))
+    setShowLogoutWorkspaceConfirm: (confirm) => {
+      set(() => ({ showLogoutWorkspaceConfirm: confirm }))
     },
     setSyncStatus: (status) => {
       set(() => ({ syncStatus: status }))

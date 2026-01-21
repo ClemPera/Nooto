@@ -9,9 +9,8 @@ use rusqlite::Error::QueryReturnedNoRows;
 
 #[derive(Debug)]
 pub struct Note {
-    pub id: Option<u32>,
-    pub id_server: Option<u64>,
-    pub id_user: Option<u32>,
+    pub uuid: Vec<u8>,
+    pub id_workspace: Option<u32>,
     pub title: String,
     pub content: Vec<u8>, //Serialized encrypted content.
     pub nonce: Vec<u8>, //Nonce used to decrypt data.
@@ -22,9 +21,8 @@ pub struct Note {
 impl From<shared::Note> for Note {
     fn from(note: shared::Note) -> Self {
         Note {
-            id: Some(note.id),
-            id_server: note.id_server,
-            id_user: None,
+            uuid: note.uuid,
+            id_workspace: None,
             title: note.title,
             content: note.content,
             nonce: note.nonce,
@@ -37,8 +35,7 @@ impl From<shared::Note> for Note {
 impl Into<shared::Note> for Note {
     fn into(self) -> shared::Note {
         shared::Note {
-            id: self.id.unwrap(),
-            id_server: self.id_server,
+            uuid: self.uuid,
             title: self.title,
             content: self.content,
             nonce: self.nonce,
@@ -51,9 +48,8 @@ impl Note {
     pub fn create(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         conn.execute(
         "CREATE TABLE IF NOT EXISTS note (
-                id INTEGER PRIMARY KEY,
-                id_server INTEGER,
-                id_user INTEGER NOT NULL REFERENCES user(id),
+                uuid BLOB PRIMARY KEY,
+                id_workspace INTEGER NOT NULL REFERENCES workspace(id),
                 title TEXT,
                 content BLOB,
                 nonce BLOB,
@@ -66,20 +62,19 @@ impl Note {
         Ok(())
     }
 
-    pub fn select(conn: &Connection, id: u32) -> Result<Option<Self>, Box<dyn std::error::Error>> {
+    pub fn select(conn: &Connection, uuid: Vec<u8>) -> Result<Option<Self>, Box<dyn std::error::Error>> {
         let note = match conn.query_one(
-            "SELECT * FROM note WHERE id = ?", 
-            (id,),
+            "SELECT * FROM note WHERE uuid = ?", 
+            (uuid,),
             |row| {
                 Ok(Note{
-                    id: row.get(0)?,
-                    id_server: row.get(1)?,
-                    id_user: row.get(2)?,
-                    title: row.get(3)?,
-                    content: row.get(4)?,
-                    nonce: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    synched: row.get(7)?
+                    uuid: row.get(0)?,
+                    id_workspace: row.get(1)?,
+                    title: row.get(2)?,
+                    content: row.get(3)?,
+                    nonce: row.get(4)?,
+                    updated_at: row.get(5)?,
+                    synched: row.get(6)?
                 })
             }
         ) {
@@ -92,35 +87,34 @@ impl Note {
 
     pub fn insert(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         conn.execute(
-            "INSERT INTO note (id_server, title, content, nonce, id_user, updated_at, synched) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
-            (&self.id_server, &self.title, &self.content, &self.nonce, &self.id_user, &self.updated_at, &self.synched)
+            "INSERT INTO note (uuid, title, content, nonce, id_workspace, updated_at, synched) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", 
+            (&self.uuid, &self.title, &self.content, &self.nonce, &self.id_workspace, &self.updated_at, &self.synched)
         ).unwrap();
 
         Ok(())
     }
 
     pub fn update(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
-        conn.execute("UPDATE note SET id_server = ?, title = ?, content = ?, nonce = ?, updated_at = ?, synched = ? WHERE id = ?",
-            (&self.id_server, &self.title, &self.content, &self.nonce, &self.updated_at, &self.synched, &self.id))?;
+        conn.execute("UPDATE note SET title = ?, content = ?, nonce = ?, updated_at = ?, synched = ? WHERE uuid = ?",
+            (&self.title, &self.content, &self.nonce, &self.updated_at, &self.synched, &self.uuid))?;
 
         Ok(())
     }
 
-    pub fn select_all(conn: &Connection, id_user: u32) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
-        let mut stmt = conn.prepare("SELECT * FROM note WHERE id_user = ?").unwrap();
+    pub fn select_all(conn: &Connection, id_workspace: u32) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
+        let mut stmt = conn.prepare("SELECT * FROM note WHERE id_workspace = ?").unwrap();
 
         let rows = stmt.query_map(
-            [id_user,],
+            [id_workspace,],
             |row| {
                 Ok(Note{
-                    id: row.get(0)?,
-                    id_server: row.get(1)?,
-                    id_user: row.get(2)?,
-                    title: row.get(3)?,
-                    content: row.get(4)?,
-                    nonce: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    synched: row.get(7)?,
+                    uuid: row.get(0)?,
+                    id_workspace: row.get(1)?,
+                    title: row.get(2)?,
+                    content: row.get(3)?,
+                    nonce: row.get(4)?,
+                    updated_at: row.get(5)?,
+                    synched: row.get(6)?,
                 })
             }
         ).unwrap();
@@ -134,15 +128,16 @@ impl Note {
         Ok(notes)
     }
 
-    pub fn delete_from_user(conn: &Connection, id_user: u32) {
-        conn.execute("DELETE FROM note WHERE id_user = ?", (id_user, )).unwrap();
+    pub fn delete_from_workspace(conn: &Connection, id_workspace: u32) {
+        conn.execute("DELETE FROM note WHERE id_workspace = ?", (id_workspace, )).unwrap();
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct User {
+pub struct Workspace {
     pub id: Option<u32>,
-    pub username: String,
+    pub workspace_name: String,
+    pub username: Option<String>,
 
     //TODO: Do not store that in plain text but use give the user the possibility to use biometric to decrypt?
     pub master_encryption_key: Key<Aes256Gcm>, 
@@ -154,11 +149,12 @@ pub struct User {
     pub instance: Option<String>
 }
 
-impl User {
+impl Workspace {
     pub fn create(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         conn.execute(
-        "CREATE TABLE IF NOT EXISTS user (
+        "CREATE TABLE IF NOT EXISTS workspace (
                 id INTEGER PRIMARY KEY,
+                workspace_name TEXT,
                 username TEXT,
                 master_encryption_key BLOB,
                 salt_recovery_data TEXT,
@@ -175,31 +171,32 @@ impl User {
 
     pub fn insert(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         conn.execute(
-            "INSERT INTO user (id, username, master_encryption_key, salt_recovery_data, mek_recovery_nonce, encrypted_mek_recovery, token, instance) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", 
-            (&self.id, &self.username, &self.master_encryption_key.to_vec(), &self.salt_recovery_data, &self.mek_recovery_nonce, &self.encrypted_mek_recovery, &self.token, &self.instance)
+            "INSERT INTO workspace (id, workspace_name, username, master_encryption_key, salt_recovery_data, mek_recovery_nonce, encrypted_mek_recovery, token, instance) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)", 
+            (&self.id, &self.workspace_name, &self.username, &self.master_encryption_key.to_vec(), &self.salt_recovery_data, &self.mek_recovery_nonce, &self.encrypted_mek_recovery, &self.token, &self.instance)
         ).unwrap();
 
         Ok(())
     }
 
-    pub fn select(conn: &Connection, username: String) -> Result<Option<Self>, Box<dyn std::error::Error>> {
-        let user = match conn.query_one(
-            "SELECT * FROM user WHERE username = ?", 
-            (username,),
+    pub fn select(conn: &Connection, workspace_name: String) -> Result<Option<Self>, Box<dyn std::error::Error>> {
+        let workspace = match conn.query_one(
+            "SELECT * FROM workspace WHERE workspace_name = ?", 
+            (workspace_name,),
             |row| {
-                let mek: Vec<u8> = row.get(2)?;
+                let mek: Vec<u8> = row.get(3)?;
                 let mek: [u8; 32] = mek.try_into().unwrap();
                 let mek: Key<Aes256Gcm> = mek.into();
 
-                Ok(User{
+                Ok(Workspace{
                     id: row.get(0)?,
-                    username: row.get(1)?,
+                    workspace_name: row.get(1)?,
+                    username: row.get(2)?,
                     master_encryption_key: mek,
-                    salt_recovery_data: row.get(3)?,
-                    mek_recovery_nonce: row.get(4)?,
-                    encrypted_mek_recovery: row.get(5)?,
-                    token: row.get(6)?,
-                    instance: row.get(7)?
+                    salt_recovery_data: row.get(4)?,
+                    mek_recovery_nonce: row.get(5)?,
+                    encrypted_mek_recovery: row.get(6)?,
+                    token: row.get(7)?,
+                    instance: row.get(8)?
                 })
             }
         ) {
@@ -208,50 +205,51 @@ impl User {
             Err(e) => return Err(e.into())
         };
 
-        Ok(user)
+        Ok(workspace)
     }
 
     pub fn select_all(conn: &Connection) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
-        let mut stmt = conn.prepare("SELECT * FROM user").unwrap();
+        let mut stmt = conn.prepare("SELECT * FROM workspace").unwrap();
 
         let rows = stmt.query_map(
             [],
             |row| {
-                let mek: Vec<u8> = row.get(2)?;
+                let mek: Vec<u8> = row.get(3)?;
                 let mek: [u8; 32] = mek.try_into().unwrap();
                 let mek: Key<Aes256Gcm> = mek.into();
 
-                Ok(User{
+                Ok(Workspace{
                     id: row.get(0)?,
-                    username: row.get(1)?,
+                    workspace_name: row.get(1)?,
+                    username: row.get(2)?,
                     master_encryption_key: mek,
-                    salt_recovery_data: row.get(3)?,
-                    mek_recovery_nonce: row.get(4)?,
-                    encrypted_mek_recovery: row.get(5)?,
-                    token: row.get(6)?,
-                    instance: row.get(7)?
+                    salt_recovery_data: row.get(4)?,
+                    mek_recovery_nonce: row.get(5)?,
+                    encrypted_mek_recovery: row.get(6)?,
+                    token: row.get(7)?,
+                    instance: row.get(8)?
                 })
             }
         ).unwrap();
 
-        let mut users = Vec::new();
+        let mut workspaces = Vec::new();
 
-        for user in rows {
-            users.push(user.unwrap());
+        for workspace in rows {
+            workspaces.push(workspace.unwrap());
         }
 
-        Ok(users)
+        Ok(workspaces)
     }
     
     pub fn update(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
-        conn.execute("UPDATE user SET username = ?, master_encryption_key = ?, salt_recovery_data = ?, mek_recovery_nonce = ?, encrypted_mek_recovery = ?, token = ?, instance = ? WHERE id = ?",
-        (&self.username, &self.master_encryption_key.to_vec(), &self.salt_recovery_data, &self.mek_recovery_nonce, &self.encrypted_mek_recovery, &self.token, &self.instance, &self.id))?;
+        conn.execute("UPDATE workspace SET workspace_name = ?, username = ?, master_encryption_key = ?, salt_recovery_data = ?, mek_recovery_nonce = ?, encrypted_mek_recovery = ?, token = ?, instance = ? WHERE id = ?",
+        (&self.workspace_name, &self.username, &self.master_encryption_key.to_vec(), &self.salt_recovery_data, &self.mek_recovery_nonce, &self.encrypted_mek_recovery, &self.token, &self.instance, &self.id))?;
         
         Ok(())
     }
 
     pub fn delete(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
-        conn.execute("DELETE FROM user WHERE id = ?", (&self.id, ))?;
+        conn.execute("DELETE FROM workspace WHERE id = ?", (&self.id, ))?;
 
         Ok(())
     }

@@ -1,45 +1,67 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 import { useGeneral } from "./store/general";
 import Home from "./components/Home";
-import LoginHome from "./components/Login/LoginHome";
-import { User } from "./components/AccountMenu";
-import LogoutConfirmModal from "./components/Login/LogoutConfirmModal";
+import { Workspace } from "./components/AccountMenu";
+import LogoutWorkspaceConfirmModal from "./components/LogoutWorkspaceConfirmModal";
 
 function App() {
-  const { user, setUser, allUsers, setAllUsers } = useGeneral();
+  const { workspace, setWorkspace, setAllWorkspaces } = useGeneral();
+  const hasInitialized = useRef(false);
 
   useEffect(() => {
-    // Initialize the database on app start
-    invoke("init").catch((e) => console.error(e));
-    invoke("get_logged_user").then((u) => u as User | null).then((u) => {
-      if (u) {
-        setUser(u);
-      };
-    }).catch((e) => console.error(e));
+    if (hasInitialized.current) return;
+    hasInitialized.current = true;
+
+    init();
   }, []);
 
-  useEffect(() => {
-    loadUsers();
-  }, [user]);
+  async function init() {
+    await invoke("init").catch((e) => console.error(e));
 
-  async function loadUsers() {
-    try {
-      const users = await invoke("get_users") as User[];
-      setAllUsers(users);
+    let backend_workspaces = await invoke("get_workspaces")
+      .then((u) => u as Workspace[])
+      .catch((e) => {
+        console.error(e);
+        return [];
+      });
 
-    } catch (e) {
-      console.error("Failed to load users:", e);
+    if (backend_workspaces.length <= 0) {
+      // Create default workspace
+      await invoke("create_workspace", { workspace_name: "workspace 1" })
+        .catch((e) => console.error(e));
+
+      await invoke("set_logged_workspace", { workspace_name: "workspace 1" });
+    }
+
+    backend_workspaces = await invoke("get_workspaces")
+      .then((u) => u as Workspace[])
+      .catch((e) => {
+        console.error(e);
+        return [];
+      });
+
+    setAllWorkspaces(backend_workspaces);
+
+    // Get and set the logged workspace
+    const loggedWorkspace = await invoke("get_logged_workspace")
+      .then((u) => u as Workspace | null)
+      .catch((e) => console.error(e));
+
+    if (loggedWorkspace) {
+      setWorkspace(loggedWorkspace);
     }
   }
 
   return (
     <div className="h-screen w-screen">
-      {/* Modals */}
-      <LogoutConfirmModal/>
 
-      {user ? <Home /> : <LoginHome />}
+      {/* Modals */}
+      <LogoutWorkspaceConfirmModal />
+
+      {!workspace && <div className="flex grow place-items-center place-content-center text-2xl text-center text-white bg-slate-800 min-h-screen backdrop-blur-sm">Creating workspace...</div>}
+      <Home />
 
     </div>
   );

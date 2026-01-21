@@ -5,17 +5,17 @@ use chrono::{DateTime, Local, NaiveDateTime};
 use rusqlite::Connection;
 use serde::Serialize;
 use tauri_plugin_log::log::{debug, trace};
+use uuid::{NoContext, Uuid};
 
-use crate::{crypt::{self, NoteData}, db::schema::{Common, Note, User}};
+use crate::{crypt::{self, NoteData}, db::schema::{Common, Note, Workspace}};
 
 //TODO: refactor this, data encryption and stuff should not be inside db?
-pub fn create_note(conn: &Connection, id_user: u32, title: String, mek: Key<Aes256Gcm>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn create_note(conn: &Connection, id_workspace: u32, title: String, mek: Key<Aes256Gcm>) -> Result<(), Box<dyn std::error::Error>> {
     let (content, nonce) = crypt::encrypt_note("".to_string(), mek).unwrap(); //Content empty because it's first note
 
     let note = Note {
-        id: None,
-        id_server: None,
-        id_user: Some(id_user),
+        uuid: Uuid::new_v7(uuid::Timestamp::now(NoContext)).as_bytes().to_vec(),
+        id_workspace: Some(id_workspace),
         content,
         nonce,
         title,
@@ -28,18 +28,17 @@ pub fn create_note(conn: &Connection, id_user: u32, title: String, mek: Key<Aes2
     Ok(())
 }
 
-pub fn get_note(conn: &Connection, id: u32, mek: Key<Aes256Gcm>) -> Result<NoteData, Box<dyn std::error::Error>> {
-    let note = Note::select(conn, id).unwrap().unwrap();
+pub fn get_note(conn: &Connection, uuid: Vec<u8>, mek: Key<Aes256Gcm>) -> Result<NoteData, Box<dyn std::error::Error>> {
+    let note = Note::select(conn, uuid).unwrap().unwrap();
 
+    //TODO: decrypt elsewhere?
     let decrypted_note = crypt::decrypt_note(note, mek).unwrap();
-
-    debug!("note decrypted");
 
     Ok(decrypted_note)
 }
 
-pub fn get_notes(conn: &Connection, id_user: u32) -> Result<Vec<Note>, Box<dyn std::error::Error>> {
-    let notes = Note::select_all(conn, id_user).unwrap();
+pub fn get_notes(conn: &Connection, id_workspace: u32) -> Result<Vec<Note>, Box<dyn std::error::Error>> {
+    let notes = Note::select_all(conn, id_workspace).unwrap();
 
     Ok(notes)
 }
@@ -61,49 +60,52 @@ pub fn update_note(conn: &Connection, note_data: NoteData, mek: Key<Aes256Gcm>) 
     Ok(())
 }
 
-pub fn create_user(conn: &Connection, username: String) -> Result<User, Box<dyn std::error::Error>> {
-    let user_encryption_data = crypt::create_user();
+pub fn create_workspace(conn: &Connection, workspace_name: String) -> Result<Workspace, Box<dyn std::error::Error>> {
+    let workspace_encryption_data = crypt::create_workspace();
 
-    let user = User {
+    let mut workspace = Workspace {
         id: None,
-        username,
-        master_encryption_key: user_encryption_data.master_encryption_key,
-        salt_recovery_data: user_encryption_data.salt_recovery_data.to_string(),
-        mek_recovery_nonce: user_encryption_data.mek_recovery_nonce,
-        encrypted_mek_recovery: user_encryption_data.encrypted_mek_recovery,
+        workspace_name,
+        username: None,
+        master_encryption_key: workspace_encryption_data.master_encryption_key,
+        salt_recovery_data: workspace_encryption_data.salt_recovery_data.to_string(),
+        mek_recovery_nonce: workspace_encryption_data.mek_recovery_nonce,
+        encrypted_mek_recovery: workspace_encryption_data.encrypted_mek_recovery,
         token: None,
         instance: None
     };
 
-    user.insert(&conn).unwrap();
+    workspace.insert(&conn).unwrap();
+
+    workspace.id = Some(conn.last_insert_rowid() as u32);
 
     //TODO: send recovery keys to frontend
 
-    Ok(user)
+    Ok(workspace)
 }
 
-pub fn update_user(conn: &Connection, new_user: User) {
-    new_user.update(conn).unwrap();
+pub fn update_workspace(conn: &Connection, new_workspace: Workspace) {
+    new_workspace.update(conn).unwrap();
 }
 
-pub fn get_user(conn: &Connection, username: String) -> Result<Option<User>, Box<dyn std::error::Error>> {
-    let user = User::select(conn, username).unwrap();
+pub fn get_workspace(conn: &Connection, workspace_name: String) -> Result<Option<Workspace>, Box<dyn std::error::Error>> {
+    let workspace = Workspace::select(conn, workspace_name).unwrap();
 
-    Ok(user)
+    Ok(workspace)
 }
 
-pub fn get_users(conn: &Connection) -> Result<Vec<User>, Box<dyn std::error::Error>> {
-    let users = User::select_all(conn).unwrap();
+pub fn get_workspaces(conn: &Connection) -> Result<Vec<Workspace>, Box<dyn std::error::Error>> {
+    let workspaces = Workspace::select_all(conn).unwrap();
 
-    Ok(users)
+    Ok(workspaces)
 }
 
-pub fn set_logged_user(conn: &Connection, user: Option<User>) {
-    match user {
-        Some(user) => {
+pub fn set_logged_workspace(conn: &Connection, workspace: Option<Workspace>) {
+    match workspace {
+        Some(workspace) => {
             match Common::select(conn, "logged".to_string()).unwrap() {
                 Some(mut common) => {
-                        common.value = user.username;
+                        common.value = workspace.workspace_name;
         
                         common.update(conn).unwrap();
                     },
@@ -111,7 +113,7 @@ pub fn set_logged_user(conn: &Connection, user: Option<User>) {
                 None => {
                     let common = Common {
                         key: "logged".to_string(),
-                        value: user.username,
+                        value: workspace.workspace_name,
                     };
                     
                     common.insert(conn).unwrap();
@@ -124,21 +126,31 @@ pub fn set_logged_user(conn: &Connection, user: Option<User>) {
     }
 }
 
-pub fn get_logged_user(conn: &Connection) -> Option<User> {
+pub fn get_logged_workspace(conn: &Connection) -> Option<Workspace> {
     match Common::select(conn, "logged".to_string()).unwrap() {
         Some(lu) => {
-            Some(User::select(conn, lu.value).unwrap().unwrap())
+            Some(Workspace::select(conn, lu.value).unwrap().unwrap())
         },
         None => None,
     }
 }
 
-pub fn logout_user(conn: &Connection, username: String) {
-    let user = User::select(conn, username).unwrap().unwrap();
+pub fn logout_workspace(conn: &Connection, workspace_name: String) {
+    let workspace = Workspace::select(conn, workspace_name).unwrap().unwrap();
 
-    Note::delete_from_user(conn, user.id.unwrap());
-
-    user.delete(conn).unwrap();
+    //TODO: This doesn't feel right without stopping sync
+    Note::delete_from_workspace(conn, workspace.id.unwrap());
+    workspace.delete(conn).unwrap();
 
     Common::delete(conn, "logged".to_string());
+}
+
+pub fn sync_logout_workspace(conn: &Connection, workspace_name: String) {
+    let mut workspace = Workspace::select(conn, workspace_name).unwrap().unwrap();
+
+    workspace.username = None;
+    workspace.token = None;
+    workspace.instance = None;
+
+    workspace.update(conn).unwrap();
 }

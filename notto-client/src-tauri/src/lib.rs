@@ -20,7 +20,7 @@ mod sync;
 #[derive(Debug)]
 pub struct AppState {
   database: Mutex<Connection>,
-  user: Option<db::schema::User>,
+  workspace: Option<db::schema::Workspace>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -37,7 +37,7 @@ pub fn run() {
 
             let app_state = Mutex::new(AppState{ 
                 database: db::init(db_path).unwrap(),
-                user: None
+                workspace: None
             });
 
             let app_handle_clone = app.app_handle().clone();
@@ -53,14 +53,14 @@ pub fn run() {
             commands::get_note,
             commands::edit_note,
             commands::get_all_notes_metadata,
-            commands::create_user,
-            commands::get_users,
-            commands::set_logged_user,
-            commands::get_logged_user,
+            commands::create_workspace,
+            commands::get_workspaces,
+            commands::set_logged_workspace,
+            commands::get_logged_workspace,
             commands::sync_create_account,
             commands::sync_login,
+            commands::sync_logout,
             commands::logout,
-            commands::test,
             ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

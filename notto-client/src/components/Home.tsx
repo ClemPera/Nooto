@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useGeneral } from "../store/general";
 import { invoke } from "@tauri-apps/api/core";
 import AccountMenu from "./AccountMenu";
+import { trace } from "@tauri-apps/plugin-log";
 
 type Note = {
   id: number;
@@ -17,7 +18,7 @@ type NoteContent = {
 };
 
 export default function Home() {
-  const { user } = useGeneral();
+  const { workspace } = useGeneral();
   const [notes, setNotes] = useState<Note[] | null>(null);
   const [currentNote, setCurrentNote] = useState<NoteContent | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -25,12 +26,16 @@ export default function Home() {
 
   useEffect(() => {
     get_notes_metadata();
-  }, []);
+  }, [workspace]);
 
   function get_notes_metadata() {
-    invoke("get_all_notes_metadata", { id_user: user?.id })
-      .then((notes) => setNotes(notes as Note[]))
-      .catch((e) => console.error(e));
+    if (workspace) {
+
+      trace("getting notes metadata from: " + workspace?.id + " - " + workspace?.workspace_name)
+      invoke("get_all_notes_metadata", { id_workspace: workspace?.id })
+        .then((notes) => setNotes(notes as Note[]))
+        .catch((e) => console.error(e));
+    }
   }
 
   async function create_note() {
@@ -150,11 +155,10 @@ export default function Home() {
                 <button
                   key={note.id}
                   onClick={() => get_note(note.id)}
-                  className={`w-full p-3 mb-1 rounded-lg text-left transition-colors ${
-                    currentNote?.id === note.id
+                  className={`w-full p-3 mb-1 rounded-lg text-left transition-colors ${currentNote?.id === note.id
                       ? "bg-blue-600 text-white"
                       : "bg-slate-700/50 text-slate-200 hover:bg-slate-700"
-                  }`}
+                    }`}
                 >
                   <div className="font-medium truncate mb-1">{note.title}</div>
                   <div className="text-xs opacity-70">
