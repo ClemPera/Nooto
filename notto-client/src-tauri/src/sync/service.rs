@@ -10,7 +10,7 @@ use tokio::sync::{Mutex, MutexGuard};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_log::log::{debug, error, trace, warn};
 
-use crate::{AppState, db::{self, schema::Note}, sync};
+use crate::{AppState, commands, db::{self, schema::Note}, sync};
 
 #[derive(Clone, Serialize)]
 pub enum SyncStatus {
@@ -32,9 +32,10 @@ pub async fn run(handle: AppHandle) {
                 if workspace.id.is_some() && workspace.token.is_some() && workspace.instance.is_some() {
                     //Update sync infos
                     let sync = Local::now().to_utc().timestamp();
+                    trace!("sync ts: {sync}");
     
                     //Sync
-                    match receive_latest_notes(&state, last_sync).await {
+                    match receive_latest_notes(&state, last_sync, &handle).await {
                         Ok(_) => {},
                         Err(e) => {
                             if let Some(e) = e.downcast_ref::<reqwest::Error>() {
@@ -94,7 +95,7 @@ pub async fn run(handle: AppHandle) {
 }
 
 
-pub async fn receive_latest_notes(state: &MutexGuard<'_, AppState>, last_sync: i64) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn receive_latest_notes(state: &MutexGuard<'_, AppState>, last_sync: i64, handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let conn = state.database.lock().await;
     
     let workspace = state.workspace.clone().unwrap();
@@ -108,31 +109,42 @@ pub async fn receive_latest_notes(state: &MutexGuard<'_, AppState>, last_sync: i
     //Ask server for modified notes
     let notes = sync::operations::select_notes(params, workspace.instance.unwrap()).await?;
 
-    trace!("notes received : {notes:?}");
-    
-    // Put new notes to database
-    notes.into_iter().for_each(|note| {
-        let mut note = db::schema::Note::from(note);
-        note.id_workspace = workspace.id;
+    if !notes.is_empty() {
+        // trace!("notes received : {notes:?}");
         
-        //Check if exist
-        let selected_note = db::schema::Note::select(&conn, note.uuid.clone()).unwrap();
+        // Put new notes to database
+        notes.into_iter().for_each(|note| {
+            debug!("note received: {}", note.title);
 
-        match selected_note {
-            Some(sn) => {
-                if note.updated_at > sn.updated_at {
-                    //Note is more recent on server
-                    match sn.synched {
-                        true => note.update(&conn).unwrap(),
-                        false => error!("Note {:?} is in conflict and it's not handled :(", sn.uuid) //TODO
-                    };
-                }
-            },
-            None => note.insert(&conn).unwrap()
-        }
+            let mut note = db::schema::Note::from(note);
+            note.id_workspace = workspace.id;
+            
+            //Check if exist
+            let selected_note = db::schema::Note::select(&conn, note.uuid.clone()).unwrap();
+    
+            match selected_note {
+                Some(sn) => {
+                    if note.updated_at > sn.updated_at {
+                        //Note is more recent on server
+                        match sn.synched {
+                            true => note.update(&conn).unwrap(),
+                            false => error!("Note {:?} is in conflict and it's not handled :(", sn.uuid) //TODO
+                        };
+                    }
+                },
+                None => note.insert(&conn).unwrap()
+            }
+    
+            //TODO: if deleted
+        });
 
-        //TODO: if deleted
-    });
+        //Send event to frontend with new note metadata 
+        //TODO: what does future me think of this?
+        let all_notes = db::operations::get_notes(&conn, workspace.id.unwrap()).unwrap();
+        let notes_metadata: Vec<commands::NoteMetadata> = all_notes.into_iter().map(commands::NoteMetadata::from).collect();
+
+        handle.emit("new_note_metadata", &notes_metadata).unwrap();
+    }
 
     Ok(())
 }
@@ -149,6 +161,8 @@ pub async fn send_latest_notes(state: &MutexGuard<'_, AppState>, handle: &AppHan
     let notes: Vec<Note> = notes.into_iter().filter(|note| !note.synched).collect();
 
     if !notes.is_empty() {
+        debug!("sending modified notes...");
+        
         handle.emit("sync-status", SyncStatus::Syncing).unwrap();
 
         let sent_notes = SentNotes {

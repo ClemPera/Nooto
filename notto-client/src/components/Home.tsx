@@ -3,6 +3,7 @@ import { useGeneral } from "../store/general";
 import { invoke } from "@tauri-apps/api/core";
 import AccountMenu from "./AccountMenu";
 import { trace } from "@tauri-apps/plugin-log";
+import { listen } from "@tauri-apps/api/event";
 
 type Note = {
   id: number;
@@ -23,6 +24,12 @@ export default function Home() {
   const [currentNote, setCurrentNote] = useState<NoteContent | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  
+  useEffect(() => {
+    listen<Note[]>('new_note_metadata', (event) => {
+      setNotes(event.payload)
+    })
+  }, [])
 
   useEffect(() => {
     get_notes_metadata();

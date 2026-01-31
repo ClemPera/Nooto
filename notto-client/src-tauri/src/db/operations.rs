@@ -56,7 +56,7 @@ pub fn update_note(conn: &Connection, note_data: NoteData, mek: Key<Aes256Gcm>) 
     
     note.update(conn).unwrap();
     
-    trace!("note updated");
+    debug!("note updated: dt:{}", note.updated_at);
     Ok(())
 }
 

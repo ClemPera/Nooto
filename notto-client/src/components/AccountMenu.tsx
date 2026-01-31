@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { syncStatusEnum, useGeneral } from "../store/general";
 import { listen } from "@tauri-apps/api/event";
+import { trace } from "@tauri-apps/plugin-log";
 
 export type Workspace = {
   id: number;
@@ -30,7 +31,7 @@ export default function AccountMenu() {
 
   useEffect(() => {
     listen<syncStatusEnum>('sync-status', (event) => {
-      console.log(event.payload)
+      trace("sync status: " + event.payload)
       setSyncStatus(event.payload)
     })
   }, [])
