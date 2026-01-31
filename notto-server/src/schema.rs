@@ -102,7 +102,7 @@ impl Note {
 
     pub async fn select_all_from_user(conn: &mut Conn, id_user: u32, after_datetime: i64) -> Vec<Self> {
         conn.exec(
-            "SELECT * FROM note WHERE id_user = :id_user AND updated_at >= :updated_at",
+            "SELECT * FROM note WHERE id_user = :id_user AND updated_at > :updated_at",
             params!(
                 "id_user" => id_user,
                 "updated_at" => after_datetime
