@@ -116,6 +116,10 @@ export default function Home() {
     note.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  async function delete_note(id: string) {
+    await invoke("delete_note", { id }).catch((e) => console.error(e));
+  }
+
   return (
     <div className="flex h-screen pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] bg-slate-900">
       {/* Mobile overlay */}
@@ -183,21 +187,52 @@ export default function Home() {
         <div className="flex-1 overflow-y-auto">
           {filteredNotes && filteredNotes.length > 0 ? (
             <div className="p-2">
-              {filteredNotes.map((note) => (
-                <button
-                  key={note.id}
-                  onClick={() => get_note(note.id)}
-                  className={`w-full p-3 mb-1 rounded-lg text-left transition-colors ${currentNote?.id === note.id
-                    ? "bg-blue-600 text-white"
-                    : "bg-slate-700/50 text-slate-200 hover:bg-slate-700"
+              {filteredNotes.map((note) => {
+                const isActive = currentNote?.id === note.id;
+
+                return (
+                  <div
+                    key={note.id}
+                    className={`group w-full p-3 mb-1 rounded-lg text-left transition-colors flex items-center gap-2 ${
+                      isActive
+                        ? "bg-blue-600 text-white"
+                        : "bg-slate-700/50 text-slate-200 hover:bg-slate-700"
                     }`}
-                >
-                  <div className="font-medium truncate mb-1">{note.title}</div>
-                  <div className="text-xs opacity-70">
-                    {new Date(note.updated_at).toLocaleDateString()}
+                  >
+                    <button
+                      onClick={() => get_note(note.id)}
+                      className="flex-1 text-left min-w-0"
+                    >
+                      <div className="font-medium truncate mb-1">{note.title}</div>
+                      <div className="text-xs opacity-70">
+                        {new Date(note.updated_at).toLocaleDateString()}
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        delete_note(note.id);
+                      }}
+                      className={`shrink-0 p-1 rounded transition-colors ${
+                        isActive
+                          ? "text-blue-200 hover:text-red-300"
+                          : "text-slate-500 hover:text-red-400"
+                      }`}
+                      title="Delete note"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
                   </div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="flex items-center justify-center h-full text-slate-500 text-sm p-4 text-center">
