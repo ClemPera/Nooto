@@ -329,10 +329,10 @@ export default function Home() {
         {currentNote ? (
           <>
             {/* Note Title with mobile menu button */}
-            <div className="border-b border-slate-700 p-3 md:p-4 flex items-center gap-3">
+            <div className="border-b border-slate-700 p-3 md:p-4 flex items-center gap-3 overflow-hidden">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="lg:hidden p-2 text-slate-400 hover:text-white transition-colors"
+                className="lg:hidden shrink-0 p-2 text-slate-400 hover:text-white transition-colors"
                 title="Menu"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -341,46 +341,55 @@ export default function Home() {
               </button>
               <input
                 type="text"
+                size={10}
                 onChange={(e) => edit_note_title(e.target.value)}
                 value={currentNote.title}
                 disabled={currentNote.deleted}
-                className="flex-1 text-xl md:text-2xl font-bold bg-transparent text-white border-none focus:outline-none placeholder-slate-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex-1 text-xl md:text-2xl font-bold bg-transparent text-white border-none focus:outline-none placeholder-slate-600 disabled:opacity-60 disabled:cursor-not-allowed truncate"
                 placeholder="Note title..."
               />
-              {currentNote.deleted ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-red-400/80 bg-red-400/10 border border-red-400/20 px-2 py-1 rounded-md whitespace-nowrap">
-                    Deleted
-                  </span>
+              <div className="ml-auto shrink-0 flex items-center gap-2">
+                {currentNote.deleted ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-red-400/80 bg-red-400/10 border border-red-400/20 px-2 py-1 rounded-md">
+                      Deleted
+                    </span>
+                    <button
+                      onClick={() => restore_note(currentNote.id)}
+                      className="text-xs text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 hover:bg-emerald-400/20 px-2 py-1 rounded-md transition-colors flex items-center gap-1"
+                      title="Restore note"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                      </svg>
+                      <span className="hidden sm:inline">Restore</span>
+                    </button>
+                  </div>
+                ) : (
                   <button
-                    onClick={() => restore_note(currentNote.id)}
-                    className="text-xs text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 hover:bg-emerald-400/20 px-2 py-1 rounded-md whitespace-nowrap transition-colors flex items-center gap-1"
-                    title="Restore note"
+                    onClick={() => setShowDeleteNoteConfirm(true, currentNote.id)}
+                    className="text-xs text-red-400/80 bg-red-400/10 border border-red-400/20 hover:bg-red-400/20 px-2 py-1 rounded-md transition-colors flex items-center gap-1"
+                    title="Delete note"
                   >
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
-                    Restore
+                    <span className="hidden sm:inline">Delete</span>
                   </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setShowDeleteNoteConfirm(true, currentNote.id)}
-                  className="text-xs text-red-400/80 bg-red-400/10 border border-red-400/20 hover:bg-red-400/20 px-2 py-1 rounded-md whitespace-nowrap transition-colors flex items-center gap-1"
-                  title="Delete note"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                  Delete
-                </button>
-              )}
-              <span className="text-xs text-slate-500 whitespace-nowrap">
-                {new Date(currentNote.updated_at).toLocaleString()}
-              </span>
+                )}
+                <span className="text-xs text-slate-500 text-right leading-tight">
+                  <span className="sm:hidden">
+                    <span className="block">{new Date(currentNote.updated_at).toLocaleDateString()}</span>
+                    <span className="block">{new Date(currentNote.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                  </span>
+                  <span className="hidden sm:inline whitespace-nowrap">
+                    {new Date(currentNote.updated_at).toLocaleString()}
+                  </span>
+                </span>
+              </div>
             </div>
             {/* Note Content */}
-            <div className="flex-1 p-3 md:p-4 overflow-y-auto">
+            <div className="flex-1 p-3 md:p-4 overflow-y-auto overflow-x-hidden">
               <textarea
                 onChange={(e) => edit_note(e.target.value)}
                 value={currentNote.content}
