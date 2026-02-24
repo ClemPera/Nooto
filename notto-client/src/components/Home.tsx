@@ -141,7 +141,7 @@ export default function Home() {
   const deletedCount = notes.filter((n) => n.deleted).length;
 
   return (
-    <div className="flex h-screen pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] bg-slate-900">
+    <div className="flex h-screen pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] bg-slate-900 overflow-hidden overscroll-none">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -341,11 +341,10 @@ export default function Home() {
               </button>
               <input
                 type="text"
-                size={10}
                 onChange={(e) => edit_note_title(e.target.value)}
                 value={currentNote.title}
                 disabled={currentNote.deleted}
-                className="flex-1 text-xl md:text-2xl font-bold bg-transparent text-white border-none focus:outline-none placeholder-slate-600 disabled:opacity-60 disabled:cursor-not-allowed truncate"
+                className="flex-1 w-0 min-w-0 text-xl md:text-2xl font-bold bg-transparent text-white border-none focus:outline-none placeholder-slate-600 disabled:opacity-60 disabled:cursor-not-allowed truncate"
                 placeholder="Note title..."
               />
               <div className="ml-auto shrink-0 flex items-center gap-2">
