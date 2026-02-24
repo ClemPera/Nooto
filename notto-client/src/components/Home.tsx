@@ -20,6 +20,7 @@ export default function Home() {
   const [currentNote, setCurrentNote] = useState<NoteContent | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -59,6 +60,16 @@ export default function Home() {
       setCurrentNote(null);
     }
   }, [notes]);
+
+  // When switching tabs, clear current note if it doesn't belong to the new tab
+  useEffect(() => {
+    if (currentNote) {
+      const noteInList = notes.find((n) => n.id === currentNote.id);
+      if (noteInList && noteInList.deleted !== showDeleted) {
+        setCurrentNote(null);
+      }
+    }
+  }, [showDeleted]);
 
   function get_notes_metadata() {
     if (workspace) {
@@ -100,6 +111,12 @@ export default function Home() {
     invoke("edit_note", { note }).catch((e) => console.error(e));
   }
 
+  async function restore_note(id: string) {
+    await invoke("restore_note", { id }).catch((e) => console.error(e));
+    setCurrentNote(null);
+    get_notes_metadata();
+  }
+
   async function edit_note_title(title: string) {
     const note: NoteContent = {
       id: currentNote?.id!,
@@ -117,8 +134,11 @@ export default function Home() {
   }
 
   const filteredNotes = notes.filter((note) =>
-    !note.deleted && note.title.toLowerCase().includes(searchQuery.toLowerCase())
+    note.deleted === showDeleted &&
+    note.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const deletedCount = notes.filter((n) => n.deleted).length;
 
   return (
     <div className="flex h-screen pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] bg-slate-900">
@@ -142,25 +162,27 @@ export default function Home() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xl font-bold text-white">Notto</h2>
             <div className="flex gap-2">
-              <button
-                onClick={create_note}
-                className="p-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-                title="New Note"
-              >
-                <svg
-                  className="w-5 h-5 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+              {!showDeleted && (
+                <button
+                  onClick={create_note}
+                  className="p-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                  title="New Note"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 4v16m8-8H4"
-                  />
-                </svg>
-              </button>
+                  <svg
+                    className="w-5 h-5 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 4v16m8-8H4"
+                    />
+                  </svg>
+                </button>
+              )}
               <button
                 onClick={() => setSidebarOpen(false)}
                 className="p-2 lg:hidden text-slate-400 hover:text-white transition-colors"
@@ -173,10 +195,41 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Active / Deleted toggle */}
+          <div className="flex rounded-lg overflow-hidden border border-slate-600 mb-3 text-sm font-medium">
+            <button
+              onClick={() => setShowDeleted(false)}
+              className={`flex-1 py-1.5 transition-colors ${
+                !showDeleted
+                  ? "bg-slate-600 text-white"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
+              }`}
+            >
+              Notes
+            </button>
+            <button
+              onClick={() => setShowDeleted(true)}
+              className={`flex-1 py-1.5 transition-colors flex items-center justify-center gap-1.5 ${
+                showDeleted
+                  ? "bg-slate-600 text-white"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
+              }`}
+            >
+              Trash
+              {deletedCount > 0 && (
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${
+                  showDeleted ? "bg-red-500/30 text-red-300" : "bg-slate-500/50 text-slate-400"
+                }`}>
+                  {deletedCount}
+                </span>
+              )}
+            </button>
+          </div>
+
           {/* Search */}
           <input
             type="text"
-            placeholder="Search notes..."
+            placeholder={showDeleted ? "Search trash..." : "Search notes..."}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -199,7 +252,9 @@ export default function Home() {
                   >
                     {/* Active accent bar */}
                     <div
-                      className={`absolute left-0 top-1/2 -translate-y-1/2 w-0.5 rounded-full transition-all duration-200 ${isActive ? "h-5 bg-blue-400" : "h-0 bg-transparent"
+                      className={`absolute left-0 top-1/2 -translate-y-1/2 w-0.5 rounded-full transition-all duration-200 ${isActive
+                          ? showDeleted ? "h-5 bg-red-400" : "h-5 bg-blue-400"
+                          : "h-0 bg-transparent"
                         }`}
                     />
 
@@ -209,32 +264,47 @@ export default function Home() {
                     >
                       <div
                         className={`text-sm font-medium truncate transition-colors ${isActive ? "text-white" : "text-slate-300 group-hover:text-white"
-                          }`}
+                          } ${showDeleted ? "line-through text-slate-400" : ""}`}
                       >
                         {note.title}
                       </div>
                     </button>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowDeleteNoteConfirm(true, note.id);
-                      }}
-                      className={`shrink-0 mr-2 p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-all duration-150 ${isActive
-                          ? "text-slate-400 hover:text-red-400 hover:bg-red-400/10"
-                          : "text-slate-500 hover:text-red-400 hover:bg-red-400/10"
-                        }`}
-                      title="Delete note"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                        />
-                      </svg>
-                    </button>
+                    {showDeleted ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          restore_note(note.id);
+                        }}
+                        className="shrink-0 mr-2 p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-all duration-150 text-slate-500 hover:text-emerald-400 hover:bg-emerald-400/10"
+                        title="Restore note"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                        </svg>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowDeleteNoteConfirm(true, note.id);
+                        }}
+                        className={`shrink-0 mr-2 p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-all duration-150 ${isActive
+                            ? "text-slate-400 hover:text-red-400 hover:bg-red-400/10"
+                            : "text-slate-500 hover:text-red-400 hover:bg-red-400/10"
+                          }`}
+                        title="Delete note"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -243,7 +313,9 @@ export default function Home() {
             <div className="flex items-center justify-center h-full text-slate-500 text-sm p-4 text-center">
               {searchQuery
                 ? "No notes found"
-                : "No notes yet. Click + to create one!"}
+                : showDeleted
+                  ? "Trash is empty"
+                  : "No notes yet. Click + to create one!"}
             </div>
           )}
         </div>
@@ -271,9 +343,38 @@ export default function Home() {
                 type="text"
                 onChange={(e) => edit_note_title(e.target.value)}
                 value={currentNote.title}
-                className="flex-1 text-xl md:text-2xl font-bold bg-transparent text-white border-none focus:outline-none placeholder-slate-600"
+                disabled={currentNote.deleted}
+                className="flex-1 text-xl md:text-2xl font-bold bg-transparent text-white border-none focus:outline-none placeholder-slate-600 disabled:opacity-60 disabled:cursor-not-allowed"
                 placeholder="Note title..."
               />
+              {currentNote.deleted ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-red-400/80 bg-red-400/10 border border-red-400/20 px-2 py-1 rounded-md whitespace-nowrap">
+                    Deleted
+                  </span>
+                  <button
+                    onClick={() => restore_note(currentNote.id)}
+                    className="text-xs text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 hover:bg-emerald-400/20 px-2 py-1 rounded-md whitespace-nowrap transition-colors flex items-center gap-1"
+                    title="Restore note"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                    </svg>
+                    Restore
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowDeleteNoteConfirm(true, currentNote.id)}
+                  className="text-xs text-red-400/80 bg-red-400/10 border border-red-400/20 hover:bg-red-400/20 px-2 py-1 rounded-md whitespace-nowrap transition-colors flex items-center gap-1"
+                  title="Delete note"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Delete
+                </button>
+              )}
               <span className="text-xs text-slate-500 whitespace-nowrap">
                 {new Date(currentNote.updated_at).toLocaleString()}
               </span>
@@ -283,7 +384,8 @@ export default function Home() {
               <textarea
                 onChange={(e) => edit_note(e.target.value)}
                 value={currentNote.content}
-                className="w-full h-full bg-transparent text-white resize-none border-none focus:outline-none placeholder-slate-600 text-sm md:text-base leading-relaxed"
+                disabled={currentNote.deleted}
+                className="w-full h-full bg-transparent text-white resize-none border-none focus:outline-none placeholder-slate-600 text-sm md:text-base leading-relaxed disabled:opacity-60 disabled:cursor-not-allowed"
                 placeholder="Start writing..."
               />
             </div>
