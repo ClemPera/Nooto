@@ -145,19 +145,11 @@ pub async fn send_latest_notes(
     workspace: Workspace,
     handle: &AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (unsynced_notes, username, token, instance) = {
+    let unsynced_notes: Vec<Note> = {
         let state = state.lock().await;
         let conn = state.database.lock().await;
-
-        let all_notes = Note::select_all(&conn, workspace.id.unwrap()).unwrap();
-        let unsynced: Vec<Note> = all_notes.into_iter().filter(|n| !n.synched).collect();
-
-        (
-            unsynced,
-            workspace.username.clone().unwrap(),
-            workspace.token.clone().unwrap(),
-            workspace.instance.clone().unwrap(),
-        )
+        Note::select_all(&conn, workspace.id.unwrap()).unwrap()
+            .into_iter().filter(|n| !n.synched).collect()
     };
 
     if !unsynced_notes.is_empty() {
@@ -166,12 +158,12 @@ pub async fn send_latest_notes(
         handle.emit("sync-status", SyncStatus::Syncing).unwrap();
 
         let sent_notes = SentNotes {
-            username,
+            username: workspace.username.unwrap(),
             notes: unsynced_notes.into_iter().map(|n| n.into()).collect(),
-            token,
+            token: workspace.token.unwrap(),
         };
 
-        let results = sync::operations::send_notes(sent_notes, instance).await?;
+        let results = sync::operations::send_notes(sent_notes, workspace.instance.unwrap()).await?;
 
         let state = state.lock().await;
         let conn = state.database.lock().await;
