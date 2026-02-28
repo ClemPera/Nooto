@@ -26,18 +26,21 @@ export default function Home() {
     let unlisten: (() => void) | undefined;
 
     listen<Note[]>('new_note_metadata', (event) => {
-      setNotes(event.payload)
+      const notes_received = event.payload
+      setNotes(notes_received)
 
       if (currentNote) {
-        const note = notes?.find(note => note.id == currentNote.id)
+        const note = notes_received?.find(note => note.id == currentNote.id)
 
         if (!note) {
-          //Current note is probably deleted
+          //Current note is probably hard deleted
           //TODO: handle.
+        } else {
+          if (note.updated_at != currentNote.updated_at) {
+            //Note has been modified
 
-        } else if (note.updated_at != currentNote.updated_at) {
-          //Note has been modified
-          get_note(note.id)
+            get_note(note.id)
+          }
         }
       }
     }).then(unlistenFn => {
@@ -199,27 +202,24 @@ export default function Home() {
           <div className="flex rounded-lg overflow-hidden border border-slate-600 mb-3 text-sm font-medium">
             <button
               onClick={() => setShowDeleted(false)}
-              className={`flex-1 py-1.5 transition-colors ${
-                !showDeleted
-                  ? "bg-slate-600 text-white"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
-              }`}
+              className={`flex-1 py-1.5 transition-colors ${!showDeleted
+                ? "bg-slate-600 text-white"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
+                }`}
             >
               Notes
             </button>
             <button
               onClick={() => setShowDeleted(true)}
-              className={`flex-1 py-1.5 transition-colors flex items-center justify-center gap-1.5 ${
-                showDeleted
-                  ? "bg-slate-600 text-white"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
-              }`}
+              className={`flex-1 py-1.5 transition-colors flex items-center justify-center gap-1.5 ${showDeleted
+                ? "bg-slate-600 text-white"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
+                }`}
             >
               Trash
               {deletedCount > 0 && (
-                <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${
-                  showDeleted ? "bg-red-500/30 text-red-300" : "bg-slate-500/50 text-slate-400"
-                }`}>
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${showDeleted ? "bg-red-500/30 text-red-300" : "bg-slate-500/50 text-slate-400"
+                  }`}>
                   {deletedCount}
                 </span>
               )}
@@ -239,22 +239,22 @@ export default function Home() {
         {/* Notes List */}
         <div className="flex-1 overflow-y-auto">
           {filteredNotes && filteredNotes.length > 0 ? (
-              <div className="px-2 py-1 divide-y space-y-1 divide-slate-700/60">
+            <div className="px-2 py-1 divide-y space-y-1 divide-slate-700/60">
               {filteredNotes.map((note) => {
                 const isActive = currentNote?.id === note.id;
                 return (
                   <div
                     key={note.id}
                     className={`group relative w-full rounded-lg text-left transition-all duration-150 flex items-center ${isActive
-                        ? "bg-slate-700 shadow-md"
-                        : "bg-slate-700/25 hover:bg-slate-700/50"
+                      ? "bg-slate-700 shadow-md"
+                      : "bg-slate-700/25 hover:bg-slate-700/50"
                       }`}
                   >
                     {/* Active accent bar */}
                     <div
                       className={`absolute left-0 top-1/2 -translate-y-1/2 w-0.5 rounded-full transition-all duration-200 ${isActive
-                          ? showDeleted ? "h-5 bg-red-400" : "h-5 bg-blue-400"
-                          : "h-0 bg-transparent"
+                        ? showDeleted ? "h-5 bg-red-400" : "h-5 bg-blue-400"
+                        : "h-0 bg-transparent"
                         }`}
                     />
 
@@ -290,8 +290,8 @@ export default function Home() {
                           setShowDeleteNoteConfirm(true, note.id);
                         }}
                         className={`shrink-0 mr-2 p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-all duration-150 ${isActive
-                            ? "text-slate-400 hover:text-red-400 hover:bg-red-400/10"
-                            : "text-slate-500 hover:text-red-400 hover:bg-red-400/10"
+                          ? "text-slate-400 hover:text-red-400 hover:bg-red-400/10"
+                          : "text-slate-500 hover:text-red-400 hover:bg-red-400/10"
                           }`}
                         title="Delete note"
                       >
@@ -376,10 +376,10 @@ export default function Home() {
                     <span className="hidden sm:inline">Delete</span>
                   </button>
                 )}
-                <span className="text-xs text-slate-500 text-right leading-tight">
+                <span className="text-xs text-slate-500 text-center leading-tight">
                   <span className="sm:hidden">
                     <span className="block">{new Date(currentNote.updated_at).toLocaleDateString()}</span>
-                    <span className="block">{new Date(currentNote.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                    <span className="block">{new Date(currentNote.updated_at).toLocaleTimeString()}</span>
                   </span>
                   <span className="hidden sm:inline whitespace-nowrap">
                     {new Date(currentNote.updated_at).toLocaleString()}
