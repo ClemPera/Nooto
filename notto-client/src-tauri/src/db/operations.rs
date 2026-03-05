@@ -10,7 +10,7 @@ use uuid::{NoContext, Uuid};
 use crate::{crypt::{self, NoteData}, db::schema::{Common, Note, Workspace}};
 
 //TODO: refactor this, data encryption and stuff should not be inside db?
-pub fn create_note(conn: &Connection, id_workspace: u32, title: String, mek: Key<Aes256Gcm>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn create_note(conn: &Connection, id_workspace: u32, title: String, mek: Key<Aes256Gcm>) -> Result<String, Box<dyn std::error::Error>> {
     let (content, nonce) = crypt::encrypt_note("".to_string(), mek).unwrap(); //Content empty because it's first note
 
     let note = Note {
@@ -26,7 +26,7 @@ pub fn create_note(conn: &Connection, id_workspace: u32, title: String, mek: Key
 
     note.insert(conn,).unwrap();
 
-    Ok(())
+    Ok(note.uuid)
 }
 
 pub fn get_note(conn: &Connection, uuid: String, mek: Key<Aes256Gcm>) -> Result<NoteData, Box<dyn std::error::Error>> {

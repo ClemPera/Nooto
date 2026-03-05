@@ -84,9 +84,10 @@ export default function Home() {
   }
 
   async function create_note() {
-    await invoke("create_note", { title: "New Note" }).catch((e) =>
-      console.error(e)
-    );
+    await invoke("create_note", { title: "New Note" })
+      .then((uuid) => get_note(uuid as string))
+      .catch((e) => console.error(e));
+      
     get_notes_metadata();
   }
 

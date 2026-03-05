@@ -99,14 +99,14 @@ pub async fn init(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError>
 pub async fn create_note(
     state: State<'_, Mutex<AppState>>,
     title: String,
-) -> Result<(), CommandError> {
+) -> Result<String, CommandError> {
     let state = state.lock().await;
 
     let conn = state.database.lock().await;
 
     let workspace = state.workspace.clone().unwrap();
 
-    db::operations::create_note(
+    let note_uuid = db::operations::create_note(
         &conn,
         workspace.id.unwrap(),
         title,
@@ -114,7 +114,7 @@ pub async fn create_note(
     )
     .unwrap();
 
-    Ok(())
+    Ok(note_uuid)
 }
 
 #[tauri::command(rename_all = "snake_case")]
