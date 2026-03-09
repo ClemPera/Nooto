@@ -4,7 +4,7 @@ use axum::{
     Json, Router,
     extract::{Query, State},
     http::StatusCode,
-    routing::{get, post, put},
+    routing::{get, post},
 };
 use dotenv::dotenv;
 use mysql_async::{Conn, Pool};

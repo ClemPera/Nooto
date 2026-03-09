@@ -87,7 +87,7 @@ export default function Home() {
   function get_latest_note() {
     if (!currentNote) {
       invoke("get_latest_note_id")
-        .then((id) => { if (id as string|null) get_note(id as string) })
+        .then((id) => { if (id as string | null) get_note(id as string) })
         .catch((e) => console.error(e));
     }
   }
@@ -96,7 +96,7 @@ export default function Home() {
     await invoke("create_note", { title: "New Note" })
       .then((uuid) => get_note(uuid as string))
       .catch((e) => console.error(e));
-      
+
     get_notes_metadata();
   }
 
@@ -255,7 +255,7 @@ export default function Home() {
                 return (
                   <div
                     key={note.id}
-                    className={`group relative w-full rounded-lg text-left transition-all duration-150 flex items-center ${isActive
+                    className={`group relative min-h-10 w-full rounded-lg text-left transition-all duration-150 flex items-center ${isActive
                       ? "bg-slate-700 shadow-md"
                       : "bg-slate-700/25 hover:bg-slate-700/50"
                       }`}
