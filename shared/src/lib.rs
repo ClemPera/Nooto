@@ -31,7 +31,7 @@ pub struct Note {
 #[derive(Deserialize, Serialize, Debug)]
 pub struct SelectNoteParams {
     pub username: String,
-    pub token: String,
+    pub token: Vec<u8>,
     pub updated_at: i64
 }
 
