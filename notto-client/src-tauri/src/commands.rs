@@ -1,7 +1,8 @@
 use tokio::sync::Mutex;
 
+use chrono::Local;
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_log::log::{debug, trace};
 use uuid::Uuid;
 
@@ -79,6 +80,20 @@ impl From<NoteData> for NoteResponse {
             deleted: note.deleted,
         }
     }
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ConflictNoteVersion {
+    pub title: String,
+    pub content: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ConflictPayload {
+    pub uuid: String,
+    pub local: ConflictNoteVersion,
+    pub server: ConflictNoteVersion,
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -471,4 +486,52 @@ pub async fn get_latest_note_id(
     let conn = state.database.lock().await;
 
     Ok(db::operations::get_latest_note(&conn))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn resolve_conflict(
+    app: AppHandle,
+    state: State<'_, Mutex<AppState>>,
+    uuid: String,
+    keep_local: bool,
+) -> Result<(), CommandError> {
+    let server_note = if !keep_local {
+        let mut state = state.lock().await;
+        Some(state.conflicts.remove(&uuid).ok_or_else(|| CommandError {
+            message: "No pending conflict found for this note".to_string(),
+        })?)
+    } else {
+        None
+    };
+
+    let notes_metadata = {
+        let state = state.lock().await;
+        let conn = state.database.lock().await;
+
+        if keep_local {
+            let mut note = Note::select(&conn, uuid.clone()).unwrap().unwrap();
+            note.updated_at = Local::now().to_utc().timestamp();
+            note.synched = false;
+            note.update(&conn).unwrap();
+        } else {
+            let server = server_note.unwrap();
+            let mut local_note = Note::select(&conn, uuid.clone()).unwrap().unwrap();
+            local_note.title = server.title;
+            local_note.content = server.content;
+            local_note.nonce = server.nonce;
+            local_note.updated_at = server.updated_at;
+            local_note.synched = true;
+            local_note.deleted = server.deleted;
+            local_note.update(&conn).unwrap();
+        }
+
+        let workspace_id = state.workspace.clone().unwrap().id.unwrap();
+        let all_notes = db::operations::get_notes(&conn, workspace_id).unwrap();
+        let metadata: Vec<NoteMetadata> = all_notes.into_iter().map(NoteMetadata::from).collect();
+        metadata
+    };
+
+    app.emit("new_note_metadata", &notes_metadata).unwrap();
+
+    Ok(())
 }

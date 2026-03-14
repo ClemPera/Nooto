@@ -1,12 +1,13 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 // #[tauri::command(rename_all = "snake_case")]
 
-use std::{env, thread::sleep, time::Duration};
+use std::{collections::HashMap, env, thread::sleep, time::Duration};
 
 use tokio::sync::Mutex;
 
 use aes_gcm::{Aes256Gcm, Key};
 use rusqlite::Connection;
+use shared::Note as SharedNote;
 use tauri::Manager;
 use tauri_plugin_log::log::{LevelFilter, debug};
 
@@ -21,6 +22,7 @@ mod sync;
 pub struct AppState {
     database: Mutex<Connection>,
     workspace: Option<db::schema::Workspace>,
+    conflicts: HashMap<String, SharedNote>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -44,6 +46,7 @@ pub fn run() {
             let app_state = Mutex::new(AppState {
                 database: db::init(db_path).unwrap(),
                 workspace: None,
+                conflicts: HashMap::new(),
             });
 
             let app_handle_clone = app.app_handle().clone();
@@ -70,7 +73,8 @@ pub fn run() {
             commands::get_version,
             commands::delete_note,
             commands::restore_note,
-            commands::get_latest_note_id
+            commands::get_latest_note_id,
+            commands::resolve_conflict
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

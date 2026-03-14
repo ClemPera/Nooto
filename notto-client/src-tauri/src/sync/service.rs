@@ -4,9 +4,9 @@ use shared::{SelectNoteParams, SentNotes};
 use tokio::{sync::Mutex, time::Duration};
 
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_log::log::{debug, error, warn};
+use tauri_plugin_log::log::{debug, warn};
 
-use crate::{AppState, commands, db::{self, schema::{Note, Workspace}}, sync};
+use crate::{AppState, commands, crypt, db::{self, schema::{Note, Workspace}}, sync};
 
 #[derive(Clone, Serialize)]
 pub enum SyncStatus {
@@ -110,32 +110,65 @@ pub async fn receive_latest_notes(
 
     let max_updated_at = notes.iter().map(|n| n.updated_at).max();
 
-    let state = state.lock().await;
-    let conn = state.database.lock().await;
+    let mut detected_conflicts: Vec<(db::schema::Note, db::schema::Note)> = vec![];
 
-    notes.into_iter().for_each(|note| {
-        debug!("note received: {}, {}", note.title, note.updated_at);
+    {
+        let state = state.lock().await;
+        let conn = state.database.lock().await;
 
-        let mut note = db::schema::Note::from(note);
-        note.id_workspace = workspace.id;
+        for note in notes {
+            debug!("note received: {}, {}", note.title, note.updated_at);
 
-        match db::schema::Note::select(&conn, note.uuid.clone()).unwrap() {
-            Some(sn) => {
-                if note.updated_at > sn.updated_at {
-                    match sn.synched {
-                        true => note.update(&conn).unwrap(),
-                        false => error!("Note {:?} is in conflict and it's not handled :(", sn.uuid) //TODO
-                    };
-                }
-            },
-            None => note.insert(&conn).unwrap()
+            let mut db_note = db::schema::Note::from(note);
+            db_note.id_workspace = workspace.id;
+
+            match db::schema::Note::select(&conn, db_note.uuid.clone()).unwrap() {
+                Some(local_note) => {
+                    if db_note.updated_at > local_note.updated_at {
+                        if local_note.synched {
+                            db_note.update(&conn).unwrap();
+                        } else {
+                            detected_conflicts.push((db_note, local_note));
+                        }
+                    }
+                },
+                None => db_note.insert(&conn).unwrap(),
+            }
         }
-    });
 
-    let all_notes = db::operations::get_notes(&conn, workspace.id.unwrap()).unwrap();
-    let notes_metadata: Vec<commands::NoteMetadata> = all_notes.into_iter().map(commands::NoteMetadata::from).collect();
+        let all_notes = db::operations::get_notes(&conn, workspace.id.unwrap()).unwrap();
+        let notes_metadata: Vec<commands::NoteMetadata> = all_notes.into_iter().map(commands::NoteMetadata::from).collect();
+        handle.emit("new_note_metadata", &notes_metadata).unwrap();
+    }
 
-    handle.emit("new_note_metadata", &notes_metadata).unwrap();
+    for (server_note, local_note) in detected_conflicts {
+        let mek = {
+            let state = state.lock().await;
+            state.workspace.clone().unwrap().master_encryption_key
+        };
+
+        let local_decrypted = crypt::decrypt_note(local_note, mek)?;
+        let server_decrypted = crypt::decrypt_note(server_note.clone(), mek)?;
+
+        {
+            let mut state = state.lock().await;
+            state.conflicts.insert(server_note.uuid.clone(), server_note.into());
+        }
+
+        handle.emit("conflict", commands::ConflictPayload {
+            uuid: local_decrypted.id.clone(),
+            local: commands::ConflictNoteVersion {
+                title: local_decrypted.title,
+                content: local_decrypted.content,
+                updated_at: local_decrypted.updated_at * 1000,
+            },
+            server: commands::ConflictNoteVersion {
+                title: server_decrypted.title,
+                content: server_decrypted.content,
+                updated_at: server_decrypted.updated_at * 1000,
+            },
+        }).unwrap();
+    }
 
     Ok(max_updated_at)
 }
@@ -167,21 +200,57 @@ pub async fn send_latest_notes(
 
         let results = sync::operations::send_notes(sent_notes, workspace.instance.unwrap()).await?;
 
-        let state = state.lock().await;
-        let conn = state.database.lock().await;
+        let mut conflict_results: Vec<(String, shared::Note)> = vec![];
 
-        results.into_iter().for_each(|result| {
-            match result.status {
-                shared::NoteStatus::Ok => {
-                    let mut note = Note::select(&conn, result.uuid).unwrap().unwrap();
-                    note.synched = true;
-                    note.update(&conn).unwrap();
-                },
-                shared::NoteStatus::Conflict => {
-                    error!("Note {:?} is in conflict and it's not handled :(", result.uuid) //TODO
+        {
+            let state = state.lock().await;
+            let conn = state.database.lock().await;
+
+            for result in results {
+                match result.status {
+                    shared::NoteStatus::Ok => {
+                        let mut note = Note::select(&conn, result.uuid).unwrap().unwrap();
+                        note.synched = true;
+                        note.update(&conn).unwrap();
+                    },
+                    shared::NoteStatus::Conflict(server_note) => {
+                        conflict_results.push((result.uuid, server_note));
+                    }
                 }
             }
-        });
+        }
+
+        for (uuid, server_note) in conflict_results {
+            let (local_decrypted, mek) = {
+                let state = state.lock().await;
+                let mek = state.workspace.clone().unwrap().master_encryption_key;
+                let conn = state.database.lock().await;
+                let local_note = Note::select(&conn, uuid.clone()).unwrap().unwrap();
+                (crypt::decrypt_note(local_note, mek)?, mek)
+            };
+
+            let server_db_note = Note::from(server_note.clone());
+            let server_decrypted = crypt::decrypt_note(server_db_note, mek)?;
+
+            {
+                let mut state = state.lock().await;
+                state.conflicts.insert(uuid.clone(), server_note);
+            }
+
+            handle.emit("conflict", commands::ConflictPayload {
+                uuid,
+                local: commands::ConflictNoteVersion {
+                    title: local_decrypted.title,
+                    content: local_decrypted.content,
+                    updated_at: local_decrypted.updated_at * 1000,
+                },
+                server: commands::ConflictNoteVersion {
+                    title: server_decrypted.title,
+                    content: server_decrypted.content,
+                    updated_at: server_decrypted.updated_at * 1000,
+                },
+            }).unwrap();
+        }
     }
 
     Ok(())
