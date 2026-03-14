@@ -98,7 +98,7 @@ pub async fn receive_latest_notes(
 ) -> Result<Option<i64>, Box<dyn std::error::Error>> {
     let params = SelectNotesParams {
         username: workspace.username.clone().unwrap(),
-        token: workspace.token.clone().unwrap(),
+        token: hex::encode(workspace.token.clone().unwrap()),
         updated_at: last_seen,
     };
 

@@ -112,7 +112,7 @@ async fn select_notes(
     user_verify(
         &mut conn,
         params.username.clone(),
-        params.token,
+        hex::decode(params.token).unwrap(),
     )
     .await?;
 
