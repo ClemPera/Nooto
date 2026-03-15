@@ -90,11 +90,13 @@ async fn send_notes(
                 }
             }
             None => {
-                let note: schema::Note = note.into();
-                note.insert(&mut conn).await;
+                let mut srv_note: schema::Note = note.into();
+                srv_note.id_user = user.id;
+
+                srv_note.insert(&mut conn).await;
 
                 result.push(SentNotesResult {
-                    uuid: note.uuid,
+                    uuid: srv_note.uuid,
                     status: shared::NoteStatus::Ok,
                 });
             }
