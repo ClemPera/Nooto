@@ -495,8 +495,6 @@ pub async fn handle_conflict(
                 let conn = state.database.lock().await;
                 let mut note = Note::select(&conn, id).unwrap().unwrap();
 
-                // Mark synched before the HTTP request to prevent the sync loop
-                // from re-sending this note and re-triggering the conflict.
                 note.synched = true;
                 note.update(&conn).unwrap();
 

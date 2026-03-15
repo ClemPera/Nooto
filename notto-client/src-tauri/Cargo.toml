@@ -1,6 +1,6 @@
 [package]
 name = "notto"
-version = "0.0.7"
+version = "0.0.9"
 description = "A Tauri App" 
 authors = ["Clément Pera"]
 edition = "2021"
