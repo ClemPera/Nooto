@@ -70,7 +70,8 @@ pub fn run() {
             commands::get_version,
             commands::delete_note,
             commands::restore_note,
-            commands::get_latest_note_id
+            commands::get_latest_note_id,
+            commands::handle_conflict
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

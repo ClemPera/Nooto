@@ -4,7 +4,7 @@ use mysql_async::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Note {
     pub uuid: String,
     pub id_user: Option<u32>, //Server id user
@@ -59,16 +59,18 @@ impl Into<shared::Note> for Note {
 impl Note {
     //TODO: pub async fn create(&self, conn: &mut Conn) {}
 
-    pub async fn select(&self, conn: &mut Conn) -> Option<Self> {
+    pub async fn select(conn: &mut Conn, id_user: u32, uuid: String) -> Option<Self> {
         conn.exec_first(
-            "SELECT * FROM note WHERE uuid = :uuid",
+            "SELECT * FROM note WHERE id_user = :id_user AND uuid = :uuid",
             params!(
-                "uuid" => &self.uuid
+                "id_user" => id_user,
+                "uuid" => uuid
             ),
         )
         .await
         .unwrap()
     }
+    
 
     pub async fn insert(&self, conn: &mut Conn) {
         conn.exec_drop(

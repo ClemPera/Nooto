@@ -22,8 +22,9 @@ async fn main() {
     let pool = Pool::new(env::var("DATABASE_URL").unwrap().as_str());
 
     let app = Router::new()
-        .route("/note", post(send_note))
-        .route("/note", get(select_notes))
+        .route("/notes", post(send_notes))
+        .route("/notes", get(select_notes))
+        .route("/note", get(select_note))
         .route("/create_account", post(insert_user)) //Create account
         // .route("/user", put()) //Update user
         .route("/login", get(login_request)) //Request login
@@ -39,6 +40,7 @@ async fn main() {
 }
 
 async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Result<(), StatusCode> {
+    //TODO: this could return user honestly
     let user = match schema::User::select(conn, username).await {
         Some(u) => u,
         None => return Err(StatusCode::UNPROCESSABLE_ENTITY),
@@ -55,11 +57,10 @@ async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Resul
     Err(StatusCode::FORBIDDEN)
 }
 
-async fn send_note(
+async fn send_notes(
     State(pool): State<Pool>,
     Json(sent_notes): Json<shared::SentNotes>,
 ) -> Result<Json<Vec<SentNotesResult>>, StatusCode> {
-    let notes: Vec<schema::Note> = sent_notes.notes.into_iter().map(|n| n.into()).collect();
     let mut conn = pool.get_conn().await.unwrap();
 
     user_verify(&mut conn, sent_notes.username.clone(), sent_notes.token).await?;
@@ -68,31 +69,36 @@ async fn send_note(
 
     let mut result: Vec<SentNotesResult> = vec![];
 
-    for mut note in notes {
+    for note in sent_notes.notes {
         println!("The user sent us some notes");
-        note.id_user = Some(user.id.unwrap());
 
-        match note.select(&mut conn).await {
+        match schema::Note::select(&mut conn, user.id.unwrap(), note.clone().uuid).await {
             Some(selected_note) => {
-                if selected_note.updated_at > note.updated_at {
+                if selected_note.updated_at > note.updated_at && !sent_notes.force {
                     result.push(SentNotesResult {
-                        uuid: note.uuid,
-                        status: shared::NoteStatus::Conflict,
+                        uuid: selected_note.uuid.clone(),
+                        status: shared::NoteStatus::Conflict(selected_note.clone().into()),
                     });
+                    println!("user {:?} has a conflict on note {:?}", user.id, selected_note.uuid)
                 } else {
-                    note.update(&mut conn).await;
+                    let mut updated_note: schema::Note = note.into();
+                    updated_note.id_user = user.id;
+                    updated_note.update(&mut conn).await;
 
                     result.push(SentNotesResult {
-                        uuid: note.uuid,
+                        uuid: updated_note.uuid,
                         status: shared::NoteStatus::Ok,
                     });
                 }
             }
             None => {
-                note.insert(&mut conn).await;
+                let mut srv_note: schema::Note = note.into();
+                srv_note.id_user = user.id;
+
+                srv_note.insert(&mut conn).await;
 
                 result.push(SentNotesResult {
-                    uuid: note.uuid,
+                    uuid: srv_note.uuid,
                     status: shared::NoteStatus::Ok,
                 });
             }
@@ -104,7 +110,7 @@ async fn send_note(
 
 async fn select_notes(
     State(pool): State<Pool>,
-    Query(params): Query<shared::SelectNoteParams>,
+    Query(params): Query<shared::SelectNotesParams>,
 ) -> Result<Json<Vec<shared::Note>>, StatusCode> {
     let mut conn = pool.get_conn().await.unwrap();
     user_verify(
@@ -126,6 +132,26 @@ async fn select_notes(
     }
 
     Ok(Json(notes))
+}
+
+async fn select_note(
+    State(pool): State<Pool>,
+    Query(params): Query<shared::SelectNoteParams>,
+) -> Result<Json<shared::Note>, StatusCode> {
+    let mut conn = pool.get_conn().await.unwrap();
+    user_verify(
+        &mut conn,
+        params.username.clone(),
+        hex::decode(params.token).unwrap(),
+    )
+    .await?;
+
+    let user = User::select(&mut conn, params.username).await.unwrap();
+
+    let note = schema::Note::select(&mut conn, user.id.unwrap(), params.note_id).await
+        .ok_or(StatusCode::NOT_FOUND)?;
+    
+    Ok(Json(note.into()))
 }
 
 async fn insert_user(State(pool): State<Pool>, Json(user): Json<shared::User>) {

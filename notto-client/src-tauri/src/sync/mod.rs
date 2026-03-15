@@ -3,7 +3,7 @@ use tokio::sync::Mutex;
 use crate::{crypt, schema::Workspace};
 use tauri_plugin_log::log::{trace, debug};
 
-mod operations;
+pub mod operations;
 pub mod service;
 
 pub async fn create_account(workspace: Workspace, username: String, account: crypt::AccountEncryptionData, instance: Option<String>){

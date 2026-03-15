@@ -1,12 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use shared::{SelectNoteParams, SentNotes};
+use shared::{SelectNotesParams, SentNotes};
 use tokio::{sync::Mutex, time::Duration};
 
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_log::log::{debug, error, warn};
+use tauri_plugin_log::log::{debug, error, info, warn};
 
-use crate::{AppState, commands, db::{self, schema::{Note, Workspace}}, sync};
+use crate::{AppState, commands, crypt, db::{self, schema::{Note, Workspace}}, sync};
 
 #[derive(Clone, Serialize)]
 pub enum SyncStatus {
@@ -96,7 +96,7 @@ pub async fn receive_latest_notes(
     last_seen: i64,
     handle: &AppHandle,
 ) -> Result<Option<i64>, Box<dyn std::error::Error>> {
-    let params = SelectNoteParams {
+    let params = SelectNotesParams {
         username: workspace.username.clone().unwrap(),
         token: hex::encode(workspace.token.clone().unwrap()),
         updated_at: last_seen,
@@ -124,7 +124,13 @@ pub async fn receive_latest_notes(
                 if note.updated_at > sn.updated_at {
                     match sn.synched {
                         true => note.update(&conn).unwrap(),
-                        false => error!("Note {:?} is in conflict and it's not handled :(", sn.uuid) //TODO
+                        false => {
+                            info!("Note {:?} is in conflict (client side)", note.uuid);
+                            let decrypted_note: commands::NoteResponse = crypt::decrypt_note(note, workspace.master_encryption_key).unwrap().into();
+
+                            handle.emit("conflict", decrypted_note).unwrap();
+                            handle.emit("sync-status", SyncStatus::Error("Conflict".to_string())).unwrap();
+                        }
                     };
                 }
             },
@@ -163,6 +169,7 @@ pub async fn send_latest_notes(
             username: workspace.username.unwrap(),
             notes: unsynced_notes.into_iter().map(|n| n.into()).collect(),
             token: workspace.token.unwrap(),
+            force: false
         };
 
         let results = sync::operations::send_notes(sent_notes, workspace.instance.unwrap()).await?;
@@ -177,8 +184,11 @@ pub async fn send_latest_notes(
                     note.synched = true;
                     note.update(&conn).unwrap();
                 },
-                shared::NoteStatus::Conflict => {
-                    error!("Note {:?} is in conflict and it's not handled :(", result.uuid) //TODO
+                shared::NoteStatus::Conflict(conflicted_note) => {
+                    info!("Note {:?} is in conflict (server side)", conflicted_note.uuid);
+                    let decrypted_note: commands::NoteResponse = crypt::decrypt_note(conflicted_note.into(), workspace.master_encryption_key).unwrap().into();
+
+                    handle.emit("conflict", decrypted_note).unwrap();
                 }
             }
         });

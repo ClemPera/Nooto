@@ -1,8 +1,10 @@
+use chrono::Local;
+use shared::{SelectNoteParams, SelectNotesParams, SentNotes};
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
 use serde::Serialize;
-use tauri::State;
-use tauri_plugin_log::log::{debug, trace};
+use tauri_plugin_log::log::{debug, error, trace};
 use uuid::Uuid;
 
 use crate::crypt::NoteData;
@@ -60,7 +62,7 @@ impl From<Note> for NoteMetadata {
 
 /// Response type for get_note command.
 /// Converts updated_at from Unix seconds (DB) to milliseconds (JS/TS) at the boundary.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct NoteResponse {
     pub id: String,
     pub title: String,
@@ -471,4 +473,80 @@ pub async fn get_latest_note_id(
     let conn = state.database.lock().await;
 
     Ok(db::operations::get_latest_note(&conn))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn handle_conflict(
+    state: State<'_, Mutex<AppState>>,
+    handle: AppHandle,
+    id: String,
+    local: bool
+) -> Result<(), CommandError> {
+    //Handle the conflict with note. 
+    //  Either keep the note local (local=1) or replace with the server one (local=0)
+    //TODO: should this be inside `sync`?
+
+    let state = state.lock().await;
+    let workspace = state.workspace.clone().unwrap();
+
+    match local {
+        true => {
+            //Send to server with force
+            let mut note = {
+                let conn = state.database.lock().await;
+                let mut note = Note::select(&conn, id).unwrap().unwrap();
+
+                note.synched = true;
+                note.update(&conn).unwrap();
+
+                note
+            };
+
+            note.updated_at = Local::now().to_utc().timestamp();
+
+            let sent_notes = SentNotes {
+                username: workspace.username.unwrap(),
+                notes: vec![note.into()],
+                token: workspace.token.unwrap(),
+                force: true
+            };
+
+            let results = sync::operations::send_notes(sent_notes, workspace.instance.unwrap()).await.unwrap();
+            results.into_iter().for_each(|result| {
+                match result.status {
+                    shared::NoteStatus::Ok => {},
+                    shared::NoteStatus::Conflict(conflicted_note) => {
+                        error!("Conflict in conflict handling, this shouldn't happen lol: {:?}", conflicted_note)
+                    }
+                }
+            });
+            
+            debug!("conflicted note has been sent to server")
+        },
+        false => {
+            //Get server note and replace local one.
+            let params = SelectNoteParams {
+                username: workspace.username.clone().unwrap(),
+                token: hex::encode(workspace.token.clone().unwrap()),
+                note_id: id,
+            };
+
+            let note = sync::operations::select_note(params, workspace.instance.unwrap()).await.unwrap();
+
+            {
+                let conn = state.database.lock().await;
+
+                let note = db::schema::Note::from(note);
+                note.update(&conn).unwrap();
+                
+                let all_notes = db::operations::get_notes(&conn, workspace.id.unwrap()).unwrap();
+                let notes_metadata: Vec<NoteMetadata> = all_notes.into_iter().map(NoteMetadata::from).collect();
+                
+                handle.emit("new_note_metadata", &notes_metadata).unwrap();
+            }
+                debug!("conflicted note has been saved locally")
+        },
+    }
+
+    Ok(())
 }

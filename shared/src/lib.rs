@@ -1,4 +1,3 @@
-use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -19,7 +18,7 @@ pub struct User {
     pub salt_server_recovery: String,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Note {
     pub uuid: String,
     pub title: String,
@@ -30,10 +29,17 @@ pub struct Note {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct SelectNoteParams {
+pub struct SelectNotesParams {
     pub username: String,
     pub token: String,
     pub updated_at: i64
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct SelectNoteParams {
+    pub username: String,
+    pub token: String,
+    pub note_id: String
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -41,12 +47,13 @@ pub struct SentNotes {
     pub notes: Vec<Note>,
     pub token: Vec<u8>,
     pub username: String,
+    pub force: bool
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum NoteStatus {
     Ok,
-    Conflict,
+    Conflict(Note),
 }
 
 #[derive(Deserialize, Serialize, Debug)]

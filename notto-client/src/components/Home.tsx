@@ -6,7 +6,7 @@ import AccountMenu from "./AccountMenu";
 import { trace } from "@tauri-apps/plugin-log";
 import { listen } from "@tauri-apps/api/event";
 
-type NoteContent = {
+export type NoteContent = {
   id: string;
   title: string;
   content: string;

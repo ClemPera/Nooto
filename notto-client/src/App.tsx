@@ -6,6 +6,7 @@ import Home from "./components/Home";
 import { Workspace } from "./components/AccountMenu";
 import LogoutWorkspaceConfirmModal from "./components/LogoutWorkspaceConfirmModal";
 import DeleteNoteConfirmModal from "./components/DeleteNoteConfirmModal";
+import ConflictModal from "./components/ConflictModal";
 
 function App() {
   const { workspace, setWorkspace, setAllWorkspaces } = useGeneral();
@@ -61,6 +62,7 @@ function App() {
       {/* Modals */}
       <LogoutWorkspaceConfirmModal />
       <DeleteNoteConfirmModal />
+      <ConflictModal />
 
       {!workspace && <div className="flex grow place-items-center place-content-center text-2xl text-center text-white bg-slate-800 min-h-screen pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] backdrop-blur-sm">Creating workspace...</div>}
       <Home />
