@@ -1,6 +1,6 @@
 use chrono::Local;
 use shared::{SelectNoteParams, SelectNotesParams, SentNotes};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
 use serde::Serialize;
@@ -478,6 +478,7 @@ pub async fn get_latest_note_id(
 #[tauri::command(rename_all = "snake_case")]
 pub async fn handle_conflict(
     state: State<'_, Mutex<AppState>>,
+    handle: AppHandle,
     id: String,
     local: bool
 ) -> Result<(), CommandError> {
@@ -537,9 +538,13 @@ pub async fn handle_conflict(
 
                 let note = db::schema::Note::from(note);
                 note.update(&conn).unwrap();
+                
+                let all_notes = db::operations::get_notes(&conn, workspace.id.unwrap()).unwrap();
+                let notes_metadata: Vec<NoteMetadata> = all_notes.into_iter().map(NoteMetadata::from).collect();
+                
+                handle.emit("new_note_metadata", &notes_metadata).unwrap();
             }
-
-            debug!("conflicted note has been saved locally")
+                debug!("conflicted note has been saved locally")
         },
     }
 
