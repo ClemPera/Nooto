@@ -266,6 +266,18 @@ export default function Home() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
                   </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      create_folder(note.id);
+                    }}
+                    className="p-1 rounded-md text-slate-500 hover:text-white hover:bg-slate-600 transition-all"
+                    title="New folder"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                  </button>
                 </>
               )}
               <button
@@ -618,44 +630,6 @@ export default function Home() {
                   />
                 </svg>
                 <p className="text-base md:text-lg font-medium">Select a note to view</p>
-                <p className="text-xs md:text-sm mt-1">Or create a new one to get started</p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-        ) : (
-          <div className="flex-1 flex flex-col">
-            <div className="lg:hidden border-b border-slate-700 p-3">
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="p-2 text-slate-400 hover:text-white transition-colors"
-                title="Menu"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 flex items-center justify-center text-slate-500 p-4">
-              <div className="text-center">
-                <svg
-                  className="w-12 h-12 md:w-16 md:h-16 mx-auto mb-4 opacity-50"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  />
-                </svg>
-                <p className="text-base md:text-lg">Select a note to view</p>
                 <p className="text-xs md:text-sm mt-1">Or create a new one to get started</p>
               </div>
             </div>
