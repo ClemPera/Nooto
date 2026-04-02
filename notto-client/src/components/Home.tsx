@@ -247,7 +247,7 @@ function NoteTreeItem({
       </div>
 
       {!isSearchResult && note.is_folder && note.folder_open && hasChildren && (
-        <div className="flex flex-col pl-3 border-l border-slate-700 mt-1 ml-3">
+        <div className="flex flex-col space-y-0.5 pl-3 border-l border-slate-700 mt-1 ml-3">
           {children.map((child) => (
             <NoteTreeItem
               key={child.id}
