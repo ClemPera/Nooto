@@ -46,6 +46,7 @@ function Divider() {
 export default function NoteEditor({ noteId, content, onChange, disabled }: Props) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSwitchingRef = useRef(false);
+  const isMountedRef = useRef(false);
 
   const editor = useEditor({
     extensions: [StarterKit, Markdown],
@@ -61,13 +62,18 @@ export default function NoteEditor({ noteId, content, onChange, disabled }: Prop
     },
   });
 
-  // Reset content when switching to a different note
+  // Reset content when switching to a different note, skip on initial mount
   useEffect(() => {
+    if (!isMountedRef.current) {
+      isMountedRef.current = true;
+      return;
+    }
     if (!editor || editor.isDestroyed) return;
     isSwitchingRef.current = true;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     editor.commands.setContent(content, { emitUpdate: false, contentType: "markdown" });
-    isSwitchingRef.current = false;
+    // onUpdate fires asynchronously, reset the flag after the current microtask queue
+    Promise.resolve().then(() => { isSwitchingRef.current = false; });
   }, [noteId]);
 
   // Sync disabled state
