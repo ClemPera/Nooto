@@ -662,6 +662,7 @@ export default function Home() {
             <div className="flex-1 flex flex-col overflow-hidden">
               {!currentNote.is_folder ? (
                 <NoteEditor
+                  key={currentNote.id}
                   noteId={currentNote.id}
                   content={currentNote.content}
                   onChange={edit_note}
