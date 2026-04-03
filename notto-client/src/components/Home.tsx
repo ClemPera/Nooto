@@ -309,9 +309,11 @@ export default function Home() {
     get_latest_note();
   }, [workspace]);
 
-  // Clear currentNote if it was removed from the notes list (e.g. deleted via modal)
+  // Clear currentNote if it was removed or its deleted status no longer matches the current tab
   useEffect(() => {
-    if (currentNote && !notes.find((n) => n.id === currentNote.id)) {
+    if (!currentNote) return;
+    const noteInList = notes.find((n) => n.id === currentNote.id);
+    if (!noteInList || noteInList.deleted !== showDeleted) {
       setCurrentNote(null);
     }
   }, [notes]);
