@@ -16,6 +16,11 @@ pub enum SyncStatus {
     NotConnected
 }
 
+enum SyncError {
+    Offline,
+    Error(String),
+}
+
 pub async fn run(handle: AppHandle) {
     let state = handle.state::<Mutex<AppState>>();
     // Track highest updated_at received from the server, persisted across restarts
@@ -34,24 +39,32 @@ pub async fn run(handle: AppHandle) {
                     // On first iteration (or after logout), init from the persisted value.
                     let current_last_seen = last_seen.unwrap_or(workspace.last_sync_at);
 
-                    // Resolve the result before any further awaits: Box<dyn Error> is !Send,
-                    // so it must not be alive across an await point in a Send future.
-                    let receive_result = receive_latest_notes(&state, workspace.clone(), current_last_seen, &handle).await;
+                    // Convert Box<dyn Error> (!Send) to SyncError (Send) immediately via
+                    // map_err, so the non-Send type never becomes a named local in this future
+                    // and can't leak into the async state machine struct.
+                    // classify is a fn item (Copy), so it can be passed to map_err twice.
+                    fn classify(e: Box<dyn std::error::Error>) -> SyncError {
+                        if e.downcast_ref::<reqwest::Error>().map(|re| re.is_connect()).unwrap_or(false) {
+                            SyncError::Offline
+                        } else {
+                            SyncError::Error(e.to_string())
+                        }
+                    }
+
+                    let receive_result = receive_latest_notes(&state, workspace.clone(), current_last_seen, &handle)
+                        .await
+                        .map_err(classify);
+
                     let new_last_seen = match receive_result {
                         Ok(max_ts) => max_ts.unwrap_or(current_last_seen),
-                        Err(e) => {
-                            if let Some(e) = e.downcast_ref::<reqwest::Error>() {
-                                if e.is_connect() {
-                                    handle.emit("sync-status", SyncStatus::Offline).unwrap();
-                                    warn!("Couldn't connect to server");
-                                } else {
-                                    handle.emit("sync-status", SyncStatus::Error(e.to_string())).unwrap();
-                                    error!("{e}");
-                                }
-                            } else {
-                                handle.emit("sync-status", SyncStatus::Error(e.to_string())).unwrap();
-                                error!("{e}");
-                            }
+                        Err(SyncError::Offline) => {
+                            handle.emit("sync-status", SyncStatus::Offline).unwrap();
+                            warn!("Couldn't connect to server");
+                            break 'sync;
+                        }
+                        Err(SyncError::Error(e)) => {
+                            handle.emit("sync-status", SyncStatus::Error(e.clone())).unwrap();
+                            error!("{e}");
                             break 'sync;
                         }
                     };
@@ -66,26 +79,23 @@ pub async fn run(handle: AppHandle) {
                     }
                     last_seen = Some(new_last_seen);
 
-                    match send_latest_notes(&state, workspace, &handle).await {
-                        Ok(_) => {},
-                        Err(e) => {
-                            if let Some(e) = e.downcast_ref::<reqwest::Error>() {
-                                if e.is_connect() {
-                                    handle.emit("sync-status", SyncStatus::Offline).unwrap();
-                                    warn!("Couldn't connect to server");
-                                    break 'sync;
-                                } else {
-                                    handle.emit("sync-status", SyncStatus::Error(e.to_string())).unwrap();
-                                    error!("{e}");
-                                    break 'sync;
-                                }
-                            } else {
-                                handle.emit("sync-status", SyncStatus::Error(e.to_string())).unwrap();
-                                error!("{e}");
-                                break 'sync;
-                            }
+                    let send_result = send_latest_notes(&state, workspace, &handle)
+                        .await
+                        .map_err(classify);
+
+                    match send_result {
+                        Ok(_) => {}
+                        Err(SyncError::Offline) => {
+                            handle.emit("sync-status", SyncStatus::Offline).unwrap();
+                            warn!("Couldn't connect to server");
+                            break 'sync;
                         }
-                    };
+                        Err(SyncError::Error(e)) => {
+                            handle.emit("sync-status", SyncStatus::Error(e.clone())).unwrap();
+                            error!("{e}");
+                            break 'sync;
+                        }
+                    }
 
                     handle.emit("sync-status", SyncStatus::Synched).unwrap();
                 } else {
