@@ -263,7 +263,7 @@ impl Workspace {
         Ok(workspaces)
     }
     
-    pub fn update(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn update(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         conn.execute("UPDATE workspace SET workspace_name = ?, username = ?, master_encryption_key = ?, salt_recovery_data = ?, mek_recovery_nonce = ?, encrypted_mek_recovery = ?, token = ?, instance = ?, last_sync_at = ? WHERE id = ?",
         (&self.workspace_name, &self.username, &self.master_encryption_key.to_vec(), &self.salt_recovery_data, &self.mek_recovery_nonce, &self.encrypted_mek_recovery, &self.token, &self.instance, &self.last_sync_at, &self.id))?;
         

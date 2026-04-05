@@ -3,7 +3,7 @@ use shared::{SelectNotesParams, SentNotes};
 use tokio::{sync::Mutex, time::Duration};
 
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_log::log::{debug, error, info, warn};
+use tauri_plugin_log::log::{debug, error, info, trace, warn};
 
 use crate::{AppState, commands, crypt::{self, NoteData}, db::{self, schema::{Note, Workspace}}, sync};
 
@@ -34,12 +34,7 @@ pub async fn run(handle: AppHandle) {
                     match receive_latest_notes(&state, workspace.clone(), current_last_seen, &handle).await {
                         Ok(max_ts) => {
                             if let Some(ts) = max_ts {
-                                // Persist so the next startup skips already-seen notes.
-                                let state = state.lock().await;
-                                let conn = state.database.lock().await;
-                                let mut updated_workspace = workspace.clone();
-                                updated_workspace.last_sync_at = ts;
-                                updated_workspace.update(&conn).unwrap();
+                                update_last_sync(&state, workspace.clone(), ts).await.unwrap();
                             }
                         },
                         Err(e) => {
@@ -61,8 +56,12 @@ pub async fn run(handle: AppHandle) {
                         }
                     };
 
-                    match send_latest_notes(&state, workspace, &handle).await {
-                        Ok(_) => {},
+                    match send_latest_notes(&state, workspace.clone(), &handle).await {
+                        Ok(max_ts) => {
+                            if let Some(ts) = max_ts {
+                                update_last_sync(&state, workspace.clone(), ts).await.unwrap();
+                            }
+                        },
                         Err(e) => {
                             if let Some(e) = e.downcast_ref::<reqwest::Error>() {
                                 if e.is_connect() {
@@ -169,7 +168,7 @@ pub async fn send_latest_notes(
     state: &Mutex<AppState>,
     workspace: Workspace,
     handle: &AppHandle,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
     let unsynced_notes: Vec<Note> = {
         let state = state.lock().await;
         let conn = state.database.lock().await;
@@ -178,6 +177,8 @@ pub async fn send_latest_notes(
         Note::select_all(&conn, workspace.id.unwrap()).unwrap()
             .into_iter().filter(|n| !n.synched).collect()
     };
+
+    let max_updated_at = unsynced_notes.iter().map(|n| n.updated_at).max();
 
     if !unsynced_notes.is_empty() {
         debug!("sending modified notes...");
@@ -230,6 +231,19 @@ pub async fn send_latest_notes(
             }
         });
     }
+
+    Ok(max_updated_at)
+}
+
+pub async fn update_last_sync(state: &Mutex<AppState>, mut updated_workspace: Workspace, timestamp: i64) 
+        -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut state = state.lock().await;
+    
+    updated_workspace.last_sync_at = timestamp;
+    state.workspace = Some(updated_workspace.clone());
+    
+    let conn = state.database.lock().await;
+    updated_workspace.update(&conn)?;
 
     Ok(())
 }
