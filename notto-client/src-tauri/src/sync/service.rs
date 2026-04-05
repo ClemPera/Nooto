@@ -239,7 +239,7 @@ pub async fn update_last_sync(state: &Mutex<AppState>, mut updated_workspace: Wo
         -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut state = state.lock().await;
     
-    updated_workspace.last_sync_at = timestamp;
+    updated_workspace.last_sync_at = timestamp+1;
     state.workspace = Some(updated_workspace.clone());
     
     let conn = state.database.lock().await;
