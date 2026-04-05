@@ -34,39 +34,37 @@ pub async fn run(handle: AppHandle) {
                     // On first iteration (or after logout), init from the persisted value.
                     let current_last_seen = last_seen.unwrap_or(workspace.last_sync_at);
 
-                    match receive_latest_notes(&state, workspace.clone(), current_last_seen, &handle).await {
-                        Ok(max_ts) => {
-                            if let Some(ts) = max_ts {
-                                last_seen = Some(ts);
-
-                                // Persist so the next startup skips already-seen notes.
-                                let state = state.lock().await;
-                                let conn = state.database.lock().await;
-                                let mut updated_workspace = workspace.clone();
-                                updated_workspace.last_sync_at = ts;
-                                updated_workspace.update(&conn).unwrap();
-                            } else {
-                                last_seen = Some(current_last_seen);
-                            }
-                        },
+                    // Resolve the result before any further awaits: Box<dyn Error> is !Send,
+                    // so it must not be alive across an await point in a Send future.
+                    let receive_result = receive_latest_notes(&state, workspace.clone(), current_last_seen, &handle).await;
+                    let new_last_seen = match receive_result {
+                        Ok(max_ts) => max_ts.unwrap_or(current_last_seen),
                         Err(e) => {
                             if let Some(e) = e.downcast_ref::<reqwest::Error>() {
                                 if e.is_connect() {
                                     handle.emit("sync-status", SyncStatus::Offline).unwrap();
                                     warn!("Couldn't connect to server");
-                                    break 'sync;
                                 } else {
                                     handle.emit("sync-status", SyncStatus::Error(e.to_string())).unwrap();
                                     error!("{e}");
-                                    break 'sync;
                                 }
                             } else {
                                 handle.emit("sync-status", SyncStatus::Error(e.to_string())).unwrap();
                                 error!("{e}");
-                                break 'sync;
                             }
+                            break 'sync;
                         }
                     };
+
+                    // Persist if the timestamp advanced, then update in-memory last_seen.
+                    if new_last_seen > current_last_seen {
+                        let state = state.lock().await;
+                        let conn = state.database.lock().await;
+                        let mut updated_workspace = workspace.clone();
+                        updated_workspace.last_sync_at = new_last_seen;
+                        updated_workspace.update(&conn).unwrap();
+                    }
+                    last_seen = Some(new_last_seen);
 
                     match send_latest_notes(&state, workspace, &handle).await {
                         Ok(_) => {},
