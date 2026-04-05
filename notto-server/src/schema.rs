@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use chrono::Local;
 use mysql_async::{
     Conn, FromRowError, Row, params,
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Note {
     pub uuid: String,
-    pub id_user: Option<u32>, //Server id user
+    pub id_user: Option<u32>,
     pub content: Vec<u8>,
     pub nonce: Vec<u8>,
     pub metadata: Vec<u8>,
@@ -64,7 +65,7 @@ impl Into<shared::Note> for Note {
 impl Note {
     //TODO: pub async fn create(&self, conn: &mut Conn) {}
 
-    pub async fn select(conn: &mut Conn, id_user: u32, uuid: String) -> Option<Self> {
+    pub async fn select(conn: &mut Conn, id_user: u32, uuid: String) -> Result<Option<Self>> {
         conn.exec_first(
             "SELECT * FROM note WHERE id_user = :id_user AND uuid = :uuid",
             params!(
@@ -73,12 +74,12 @@ impl Note {
             ),
         )
         .await
-        .unwrap()
+        .context("Failed to select note")
     }
 
-    pub async fn insert(&self, conn: &mut Conn) {
+    pub async fn insert(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
-            "INSERT INTO note (uuid, id_user, content, nonce, metadata, metadata_nonce, updated_at, deleted) 
+            "INSERT INTO note (uuid, id_user, content, nonce, metadata, metadata_nonce, updated_at, deleted) \
             VALUES (:uuid, :id_user, :content, :nonce, :metadata, :metadata_nonce, :updated_at, :deleted)",
             params!(
                 "uuid" => &self.uuid,
@@ -92,13 +93,13 @@ impl Note {
             ),
         )
         .await
-        .unwrap();
+        .context("Failed to insert note")
     }
 
-    pub async fn update(&self, conn: &mut Conn) {
+    pub async fn update(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
-            "UPDATE note 
-            SET content = :content, nonce = :nonce, metadata = :metadata, metadata_nonce = :metadata_nonce, updated_at = :updated_at, deleted = :deleted
+            "UPDATE note \
+            SET content = :content, nonce = :nonce, metadata = :metadata, metadata_nonce = :metadata_nonce, updated_at = :updated_at, deleted = :deleted \
             WHERE uuid = :uuid",
             params!(
                 "content" => &self.content,
@@ -111,14 +112,14 @@ impl Note {
             ),
         )
         .await
-        .unwrap();
+        .context("Failed to update note")
     }
 
     pub async fn select_all_from_user(
         conn: &mut Conn,
         id_user: u32,
         after_datetime: i64,
-    ) -> Vec<Self> {
+    ) -> Result<Vec<Self>> {
         conn.exec(
             "SELECT * FROM note WHERE id_user = :id_user AND updated_at > :updated_at",
             params!(
@@ -127,7 +128,7 @@ impl Note {
             ),
         )
         .await
-        .unwrap()
+        .context("Failed to select notes")
     }
 }
 
@@ -194,7 +195,7 @@ impl From<shared::User> for User {
 impl User {
     //TODO: pub async fn create(&self, conn: &mut Conn) {}
 
-    pub async fn select(conn: &mut Conn, username: String) -> Option<Self> {
+    pub async fn select(conn: &mut Conn, username: String) -> Result<Option<Self>> {
         conn.exec_first(
             "SELECT * FROM user WHERE username = :username",
             params!(
@@ -202,14 +203,15 @@ impl User {
             ),
         )
         .await
-        .unwrap()
+        .context("Failed to select user")
     }
 
-    pub async fn insert(&self, conn: &mut Conn) {
-        conn.exec_drop("INSERT INTO user (username, stored_password_hash, stored_recovery_hash, encrypted_mek_password, mek_password_nonce,
-                encrypted_mek_recovery, mek_recovery_nonce, salt_auth, salt_data, salt_recovery_auth, salt_recovery_data, salt_server_auth, salt_server_recovery) 
-            VALUES (:username, :stored_password_hash, :stored_recovery_hash, :encrypted_mek_password, :mek_password_nonce, :encrypted_mek_recovery, :mek_recovery_nonce, :salt_auth, 
-                :salt_data, :salt_recovery_auth, :salt_recovery_data, :salt_server_auth, :salt_server_recovery)", 
+    pub async fn insert(&self, conn: &mut Conn) -> Result<()> {
+        conn.exec_drop(
+            "INSERT INTO user (username, stored_password_hash, stored_recovery_hash, encrypted_mek_password, mek_password_nonce,
+                encrypted_mek_recovery, mek_recovery_nonce, salt_auth, salt_data, salt_recovery_auth, salt_recovery_data, salt_server_auth, salt_server_recovery) \
+            VALUES (:username, :stored_password_hash, :stored_recovery_hash, :encrypted_mek_password, :mek_password_nonce, :encrypted_mek_recovery, :mek_recovery_nonce, :salt_auth, \
+                :salt_data, :salt_recovery_auth, :salt_recovery_data, :salt_server_auth, :salt_server_recovery)",
             params!(
                 "username" => &self.username,
                 "stored_password_hash" => &self.stored_password_hash,
@@ -224,7 +226,10 @@ impl User {
                 "salt_recovery_data" => &self.salt_recovery_data,
                 "salt_server_auth" => &self.salt_server_auth,
                 "salt_server_recovery" => &self.salt_server_recovery,
-            )).await.unwrap();
+            ),
+        )
+        .await
+        .context("Failed to insert user")
     }
 }
 
@@ -248,9 +253,9 @@ impl FromRow for UserToken {
 impl UserToken {
     //TODO: pub async fn create(&self, conn: &mut Conn) {}
 
-    pub async fn insert(&self, conn: &mut Conn) {
+    pub async fn insert(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
-            "INSERT INTO user_token (id_user, token) 
+            "INSERT INTO user_token (id_user, token) \
             VALUES (:id_user, :token)",
             params!(
                 "id_user" => &self.id_user,
@@ -258,10 +263,10 @@ impl UserToken {
             ),
         )
         .await
-        .unwrap();
+        .context("Failed to insert user token")
     }
 
-    pub async fn select(conn: &mut Conn, id: u32) -> Vec<Self> {
+    pub async fn select(conn: &mut Conn, id: u32) -> Result<Vec<Self>> {
         conn.exec(
             "SELECT * FROM user_token WHERE id_user = :id_user",
             params!(
@@ -269,6 +274,6 @@ impl UserToken {
             ),
         )
         .await
-        .unwrap()
+        .context("Failed to select user tokens")
     }
 }

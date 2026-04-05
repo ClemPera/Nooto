@@ -1,11 +1,7 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-// #[tauri::command(rename_all = "snake_case")]
-
-use std::{env, thread::sleep, time::Duration};
+use std::env;
 
 use tokio::sync::Mutex;
 
-use aes_gcm::{Aes256Gcm, Key};
 use rusqlite::Connection;
 use tauri::Manager;
 use tauri_plugin_log::log::{LevelFilter, debug};
@@ -33,16 +29,22 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
-                // .level(tauri_plugin_log::log::LevelFilter::Trace)
                 .level(log_level)
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let db_path = app.path().app_data_dir().unwrap().join("notto.db");
+            let db_path = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| anyhow::anyhow!("Failed to get app data directory: {e}"))?
+                .join("notto.db");
+
+            let database = db::init(db_path)
+                .map_err(|e| anyhow::anyhow!("Failed to initialise database: {e:#}"))?;
 
             let app_state = Mutex::new(AppState {
-                database: db::init(db_path).unwrap(),
+                database,
                 workspace: None,
             });
 

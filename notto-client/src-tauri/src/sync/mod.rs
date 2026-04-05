@@ -1,16 +1,18 @@
-use rusqlite::Connection;
-use tokio::sync::Mutex;
-use crate::{crypt, schema::Workspace};
-use tauri_plugin_log::log::{trace, debug};
+use anyhow::{Context, Result};
+use tauri_plugin_log::log::trace;
+
+use crate::{crypt, db::schema::Workspace};
 
 pub mod operations;
 pub mod service;
 
-pub async fn create_account(workspace: Workspace, username: String, account: crypt::AccountEncryptionData, instance: Option<String>){
-    let instance = match instance {
-        Some(i) => i,
-        None => "http://localhost:3000".to_string()
-    };
+pub async fn create_account(
+    workspace: Workspace,
+    username: String,
+    account: crypt::AccountEncryptionData,
+    instance: Option<String>,
+) -> Result<()> {
+    let instance = instance.unwrap_or_else(|| "http://localhost:3000".to_string()); //TODO
 
     let send_user = shared::User {
         id: None,
@@ -29,28 +31,34 @@ pub async fn create_account(workspace: Workspace, username: String, account: cry
         salt_server_recovery: account.salt_server_recovery.to_string(),
     };
 
-    operations::create_account(send_user, instance).await.unwrap();
+    operations::create_account(send_user, instance)
+        .await
+        .context("Failed to create account on server")
 }
 
-pub async fn login(username: String, password: String, instance: String) -> shared::Login{
+pub async fn login(username: String, password: String, instance: String) -> Result<shared::Login> {
     trace!("requesting login...");
-    //Request login
+
     let request_params = shared::LoginRequestParams {
-        username: username.clone()
+        username: username.clone(),
     };
-    
-    let login_request = operations::login_request(request_params, instance.clone()).await.unwrap();
-    
+
+    let login_request = operations::login_request(request_params, instance.clone())
+        .await
+        .context("Failed to request login challenge")?;
+
     trace!("hashing login...");
-    //Hash
-    let login_hash = crypt::login(login_request, password);
-    
-    //Login
+
+    let login_hash = crypt::login(login_request, password).context("Failed to compute login hash")?;
+
     trace!("loggin in...");
+
     let login_params = shared::LoginParams {
         username,
-        login_hash
+        login_hash,
     };
-    
-    operations::login(login_params, instance).await.unwrap()
+
+    operations::login(login_params, instance)
+        .await
+        .context("Login failed")
 }
