@@ -58,7 +58,7 @@ impl From<anyhow::Error> for CommandError {
             ErrorKind::Internal
         };
 
-        CommandError { kind, message: err.to_string() }
+        CommandError { kind, message: format!("{:#}", err) }
     }
 }
 
