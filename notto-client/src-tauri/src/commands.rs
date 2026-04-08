@@ -142,7 +142,7 @@ pub async fn init(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError>
 
     let workspace = {
         let conn = state.database.lock().await;
-        db::operations::get_logged_workspace(&conn).context("Failed to load logged workspace")?
+        db::operations::get_logged_workspace(&conn)?
     };
 
     state.workspace = workspace;
@@ -171,8 +171,7 @@ pub async fn create_note(
         parent_id,
         false, // is_folder
         workspace.master_encryption_key,
-    )
-    .context("Failed to create note")?;
+    )?;
 
     Ok(note_uuid)
 }
@@ -198,8 +197,7 @@ pub async fn create_folder(
         parent_id,
         true, // is_folder
         workspace.master_encryption_key,
-    )
-    .context("Failed to create folder")?;
+    )?;
 
     Ok(folder_uuid)
 }
@@ -220,11 +218,9 @@ pub async fn get_note(
         .clone()
         .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
 
-    let note = db::operations::get_note(&conn, uuid.to_string(), workspace.master_encryption_key)
-        .context("Could not open note")?;
+    let note = db::operations::get_note(&conn, uuid.to_string(), workspace.master_encryption_key)?;
 
-    db::operations::set_latest_note(&conn, Some(note.id.clone()))
-        .context("Failed to save latest note")?;
+    db::operations::set_latest_note(&conn, Some(note.id.clone()))?;
 
     Ok(NoteResponse::from(note))
 }
@@ -242,8 +238,7 @@ pub async fn edit_note(
         .clone()
         .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
 
-    db::operations::update_note(&conn, note, workspace.master_encryption_key)
-        .context("Failed to save note")?;
+    db::operations::update_note(&conn, note, workspace.master_encryption_key)?;
 
     Ok(())
 }
@@ -261,14 +256,12 @@ pub async fn get_all_notes_metadata(
         .clone()
         .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
 
-    let notes = db::operations::get_notes(&conn, id_workspace)
-        .context("Failed to load notes")?;
+    let notes = db::operations::get_notes(&conn, id_workspace)?;
 
     let notes_metadata = notes
         .into_iter()
         .map(|n| NoteMetadata::from_note(n, &workspace.master_encryption_key))
-        .collect::<anyhow::Result<Vec<_>>>()
-        .context("Failed to decrypt notes")?;
+        .collect::<anyhow::Result<Vec<_>>>()?;
 
     Ok(notes_metadata)
 }
@@ -282,7 +275,7 @@ pub async fn create_workspace(
 
     let workspace = {
         let conn = state.database.lock().await;
-        db::operations::create_workspace(&conn, workspace_name).context("Failed to create workspace")?
+        db::operations::create_workspace(&conn, workspace_name)?
     };
 
     state.workspace = Some(workspace);
@@ -299,7 +292,7 @@ pub async fn get_workspaces(
     let state = state.lock().await;
     let conn = state.database.lock().await;
 
-    let workspaces = db::operations::get_workspaces(&conn).context("Failed to load workspaces")?;
+    let workspaces = db::operations::get_workspaces(&conn)?;
 
     let filtered = workspaces.into_iter().map(FilteredWorkspace::from).collect();
 
@@ -316,8 +309,7 @@ pub async fn set_logged_workspace(
     let workspace = if !workspace_name.is_empty() {
         let workspace = {
             let conn = state.database.lock().await;
-            db::operations::get_workspace(&conn, workspace_name)
-                .context("Failed to look up workspace")?
+            db::operations::get_workspace(&conn, workspace_name)?
                 .ok_or_else(|| CommandError::not_found("Workspace doesn't exist"))?
         };
 
@@ -329,8 +321,7 @@ pub async fn set_logged_workspace(
     state.workspace = workspace.clone();
 
     let conn = state.database.lock().await;
-    db::operations::set_logged_workspace(&conn, workspace.clone())
-        .context("Failed to save logged workspace")?;
+    db::operations::set_logged_workspace(&conn, workspace.clone())?;
 
     let workspace = workspace.ok_or_else(|| CommandError::not_found("Workspace not found"))?;
 
@@ -367,8 +358,7 @@ pub async fn sync_create_account(
         .clone()
         .ok_or_else(|| CommandError::unauthorized("A workspace must be loaded before creating an account"))?;
 
-    let account = crypt::create_account(password, workspace.master_encryption_key)
-        .context("Failed to generate account encryption data")?;
+    let account = crypt::create_account(password, workspace.master_encryption_key)?;
 
     trace!("create account: start creating");
 
@@ -410,28 +400,24 @@ pub async fn sync_login(
         login_data.encrypted_mek_password,
         login_data.salt_data,
         login_data.mek_password_nonce,
-    )
-    .context("Failed to decrypt master encryption key")?;
+    )?;
 
     trace!("mek decrypted");
 
     let notes: Vec<NoteData> = {
         let conn = state.database.lock().await;
-        let notes: Vec<Note> = db::operations::get_notes(&conn, workspace.id)
-            .context("Failed to read existing notes")?;
+        let notes: Vec<Note> = db::operations::get_notes(&conn, workspace.id)?;
 
         notes
             .into_iter()
             .map(|n| db::operations::get_note(&conn, n.uuid, mek))
-            .collect::<anyhow::Result<Vec<_>>>()
-            .context("Failed to decrypt existing notes")?
+            .collect::<anyhow::Result<Vec<_>>>()?
     };
 
     if !notes.is_empty() {
         let conn = state.database.lock().await;
         for note in notes {
-            db::operations::update_note(&conn, note, mek)
-                .context("Failed to re-encrypt note with server key")?;
+            db::operations::update_note(&conn, note, mek)?;
         }
     }
 
@@ -444,8 +430,7 @@ pub async fn sync_login(
 
     {
         let conn = state.database.lock().await;
-        db::operations::update_workspace(&conn, workspace.clone())
-            .context("Failed to save workspace after login")?;
+        db::operations::update_workspace(&conn, workspace.clone())?;
     }
 
     trace!("db workspace modified");
@@ -468,14 +453,12 @@ pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), Comman
 
     {
         let conn = state.database.lock().await;
-        db::operations::sync_logout_workspace(&conn, workspace.workspace_name.clone())
-            .context("Failed to clear sync credentials")?;
+        db::operations::sync_logout_workspace(&conn, workspace.workspace_name.clone())?;
     }
 
     state.workspace = {
         let conn = state.database.lock().await;
-        db::operations::get_workspace(&conn, workspace.workspace_name)
-            .context("Failed to reload workspace after logout")?
+        db::operations::get_workspace(&conn, workspace.workspace_name)?
     };
 
     Ok(())
@@ -492,8 +475,7 @@ pub async fn logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandErro
             .clone()
             .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
 
-        db::operations::logout_workspace(&conn, workspace.workspace_name)
-            .context("Failed to log out")?;
+        db::operations::logout_workspace(&conn, workspace.workspace_name)?;
     }
 
     state.workspace = None;
@@ -519,15 +501,13 @@ pub async fn delete_note(
         .clone()
         .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
 
-    let mut note = db::operations::get_note(&conn, id, workspace.master_encryption_key)
-        .context("Failed to find note")?;
+    let mut note = db::operations::get_note(&conn, id, workspace.master_encryption_key)?;
 
     note.deleted = true;
 
-    db::operations::update_note(&conn, note, workspace.master_encryption_key)
-        .context("Failed to delete note")?;
+    db::operations::update_note(&conn, note, workspace.master_encryption_key)?;
 
-    db::operations::set_latest_note(&conn, None).context("Failed to clear latest note")?;
+    db::operations::set_latest_note(&conn, None)?;
 
     Ok(())
 }
@@ -545,13 +525,11 @@ pub async fn restore_note(
         .clone()
         .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
 
-    let mut note = db::operations::get_note(&conn, id, workspace.master_encryption_key)
-        .context("Failed to find note")?;
+    let mut note = db::operations::get_note(&conn, id, workspace.master_encryption_key)?;
 
     note.deleted = false;
 
-    db::operations::update_note(&conn, note, workspace.master_encryption_key)
-        .context("Failed to restore note")?;
+    db::operations::update_note(&conn, note, workspace.master_encryption_key)?;
 
     Ok(())
 }
@@ -563,9 +541,7 @@ pub async fn get_latest_note_id(
     let state = state.lock().await;
     let conn = state.database.lock().await;
 
-    db::operations::get_latest_note(&conn)
-        .context("Failed to get latest note")
-        .map_err(CommandError::from)
+    db::operations::get_latest_note(&conn).map_err(CommandError::from)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -621,9 +597,7 @@ pub async fn handle_conflict(
                 force: true,
             };
 
-            let results = sync::operations::send_notes(sent_notes, instance)
-                .await
-                .context("Failed to send conflicted note to server")?;
+            let results = sync::operations::send_notes(sent_notes, instance).await?;
 
             for result in results {
                 match result.status {
@@ -659,9 +633,7 @@ pub async fn handle_conflict(
                 note_id: id,
             };
 
-            let note = sync::operations::select_note(params, instance)
-                .await
-                .context("Failed to fetch note from server")?;
+            let note = sync::operations::select_note(params, instance).await?;
 
             {
                 let conn = state.database.lock().await;
@@ -669,14 +641,12 @@ pub async fn handle_conflict(
                 let note = db::schema::Note::from(note);
                 note.update(&conn).context("Failed to save server note locally")?;
 
-                let all_notes = db::operations::get_notes(&conn, workspace.id)
-                    .context("Failed to reload notes")?;
+                let all_notes = db::operations::get_notes(&conn, workspace.id)?;
 
                 let notes_metadata = all_notes
                     .into_iter()
                     .map(|n| NoteMetadata::from_note(n, &workspace.master_encryption_key))
-                    .collect::<anyhow::Result<Vec<_>>>()
-                    .context("Failed to decrypt notes")?;
+                    .collect::<anyhow::Result<Vec<_>>>()?;
 
                 handle
                     .emit("new_note_metadata", &notes_metadata)

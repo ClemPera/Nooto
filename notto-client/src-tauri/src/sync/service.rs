@@ -109,8 +109,7 @@ pub async fn receive_latest_notes(
     };
 
     let notes = sync::operations::select_notes(params, workspace.instance.clone().context("Workspace has no instance")?)
-        .await
-        .context("Failed to fetch notes from server")?;
+        .await?;
 
     if notes.is_empty() {
         return Ok(None);
@@ -146,14 +145,12 @@ pub async fn receive_latest_notes(
         }
     }
 
-    let all_notes = db::operations::get_notes(&conn, workspace.id)
-        .context("Failed to read notes after sync")?;
+    let all_notes = db::operations::get_notes(&conn, workspace.id)?;
 
     let notes_metadata = all_notes
         .into_iter()
         .map(|n| commands::NoteMetadata::from_note(n, &workspace.master_encryption_key))
-        .collect::<Result<Vec<_>>>()
-        .context("Failed to decrypt notes metadata")?;
+        .collect::<Result<Vec<_>>>()?;
 
     emit(handle, "new_note_metadata", &notes_metadata);
 
@@ -195,8 +192,7 @@ pub async fn send_latest_notes(
             sent_notes,
             workspace.instance.clone().context("Workspace has no instance")?,
         )
-        .await
-        .context("Failed to send notes to server")?;
+        .await?;
 
         let state = state.lock().await;
         let conn = state.database.lock().await;

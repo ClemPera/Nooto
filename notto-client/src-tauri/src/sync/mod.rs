@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tauri_plugin_log::log::trace;
 
 use crate::{crypt, db::schema::Workspace};
@@ -31,9 +31,7 @@ pub async fn create_account(
         salt_server_recovery: account.salt_server_recovery.to_string(),
     };
 
-    operations::create_account(send_user, instance)
-        .await
-        .context("Failed to create account on server")
+    operations::create_account(send_user, instance).await
 }
 
 pub async fn login(username: String, password: String, instance: String) -> Result<shared::Login> {
@@ -43,13 +41,11 @@ pub async fn login(username: String, password: String, instance: String) -> Resu
         username: username.clone(),
     };
 
-    let login_request = operations::login_request(request_params, instance.clone())
-        .await
-        .context("Failed to request login challenge")?;
+    let login_request = operations::login_request(request_params, instance.clone()).await?;
 
     trace!("hashing login...");
 
-    let login_hash = crypt::login(login_request, password).context("Failed to compute login hash")?;
+    let login_hash = crypt::login(login_request, password)?;
 
     trace!("loggin in...");
 
