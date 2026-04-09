@@ -41,6 +41,7 @@ pub async fn run(handle: AppHandle) {
                             if let Some(ts) = max_ts {
                                 if let Err(e) = update_last_sync(&state, workspace.clone(), ts).await {
                                     error!("{e:#}");
+                                    emit(&handle, "sync-status", SyncStatus::Error(format!("{e:#}").to_string()));
                                     break 'sync;
                                 }
                             }
@@ -48,9 +49,9 @@ pub async fn run(handle: AppHandle) {
                         Err(e) => {
                             if e.downcast_ref::<reqwest::Error>().map_or(false, |e| e.is_connect()) {
                                 emit(&handle, "sync-status", SyncStatus::Offline);
-                                warn!("Couldn't connect to server");
+                                info!("Couldn't connect to server");
                             } else {
-                                emit(&handle, "sync-status", SyncStatus::Error(e.to_string()));
+                                emit(&handle, "sync-status", SyncStatus::Error(format!("{e:#}").to_string()));
                                 error!("{e:#}");
                             }
                             break 'sync;
@@ -62,6 +63,7 @@ pub async fn run(handle: AppHandle) {
                             if let Some(ts) = max_ts {
                                 if let Err(e) = update_last_sync(&state, workspace.clone(), ts).await {
                                     error!("{e:#}");
+                                    emit(&handle, "sync-status", SyncStatus::Error(format!("{e:#}").to_string()));
                                     break 'sync;
                                 }
                             }
@@ -69,9 +71,9 @@ pub async fn run(handle: AppHandle) {
                         Err(e) => {
                             if e.downcast_ref::<reqwest::Error>().map_or(false, |e| e.is_connect()) {
                                 emit(&handle, "sync-status", SyncStatus::Offline);
-                                warn!("Couldn't connect to server");
+                                info!("Couldn't connect to server");
                             } else {
-                                emit(&handle, "sync-status", SyncStatus::Error(e.to_string()));
+                                emit(&handle, "sync-status", SyncStatus::Error(format!("{e:#}").to_string()));
                                 error!("{e:#}");
                             }
                             break 'sync;
@@ -136,7 +138,6 @@ pub async fn receive_latest_notes(
 
                             let decrypted_note = decrypt_note_for_emit(&note, &workspace)?;
                             emit(handle, "conflict", decrypted_note);
-                            emit(handle, "sync-status", SyncStatus::Error("Conflict".to_string()));
                         }
                     }
                 }
