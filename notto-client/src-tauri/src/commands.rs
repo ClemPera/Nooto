@@ -37,15 +37,18 @@ pub struct CommandError {
 }
 
 impl CommandError {
-    pub fn unauthorized(msg: impl Into<String>) -> Self {
+    pub fn unauthorized(msg: impl Into<String> + Clone) -> Self {
+        error!("Unauthorized: {}", msg.clone().into());
         CommandError { kind: ErrorKind::Unauthorized, message: msg.into() }
     }
 
-    pub fn not_found(msg: impl Into<String>) -> Self {
+    pub fn not_found(msg: impl Into<String> + Clone) -> Self {
+        error!("NotFound: {}", msg.clone().into());
         CommandError { kind: ErrorKind::NotFound, message: msg.into() }
     }
 
-    pub fn invalid_input(msg: impl Into<String>) -> Self {
+    pub fn invalid_input(msg: impl Into<String> + Clone) -> Self {
+        error!("InvalidInput: {}", msg.clone().into());
         CommandError { kind: ErrorKind::InvalidInput, message: msg.into() }
     }
 }
@@ -58,6 +61,7 @@ impl From<anyhow::Error> for CommandError {
             ErrorKind::Internal
         };
 
+        error!("Error: {}", format!("{:#}", err) );
         CommandError { kind, message: format!("{:#}", err) }
     }
 }
