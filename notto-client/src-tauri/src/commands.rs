@@ -392,7 +392,7 @@ pub async fn sync_login(
         .clone()
         .ok_or_else(|| CommandError::unauthorized("A workspace must be loaded before logging in"))?;
 
-    let instance = instance.unwrap_or_else(|| "http://localhost:3000".to_string()); //TODO
+    let instance: String = instance.context("Instance url is empty")?;
 
     let login_data = sync::login(username.clone(), password.clone(), instance.clone())
         .await?;

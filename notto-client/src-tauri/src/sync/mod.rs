@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, Context};
 use tauri_plugin_log::log::trace;
 
 use crate::{crypt, db::schema::Workspace};
@@ -12,7 +12,8 @@ pub async fn create_account(
     account: crypt::AccountEncryptionData,
     instance: Option<String>,
 ) -> Result<()> {
-    let instance = instance.unwrap_or_else(|| "http://localhost:3000".to_string()); //TODO
+
+    let instance: String = instance.context("Instance url is empty")?;
 
     let send_user = shared::User {
         id: None,
