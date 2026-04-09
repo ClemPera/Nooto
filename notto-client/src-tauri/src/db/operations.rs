@@ -191,15 +191,17 @@ pub fn get_logged_workspace(conn: &Connection) -> Result<Option<Workspace>> {
     }
 }
 
-pub fn set_latest_note(conn: &Connection, uuid: Option<String>) -> Result<()> {
+pub fn set_latest_note(conn: &Connection, workspace_id: u32, uuid: Option<String>) -> Result<()> {
+    let key = format!("latest_note_{}", workspace_id);
     match uuid {
-        Some(uuid) => common_insert_or_update(conn, "latest_note".to_string(), uuid),
-        None => Common::delete(conn, "latest_note".to_string()),
+        Some(uuid) => common_insert_or_update(conn, key, uuid),
+        None => Common::delete(conn, key),
     }
 }
 
-pub fn get_latest_note(conn: &Connection) -> Result<Option<String>> {
-    match Common::select(conn, "latest_note".to_string()).context("Failed to read latest note")? {
+pub fn get_latest_note(conn: &Connection, workspace_id: u32) -> Result<Option<String>> {
+    let key = format!("latest_note_{}", workspace_id);
+    match Common::select(conn, key).context("Failed to read latest note")? {
         Some(lu) => Ok(Some(lu.value)),
         None => Ok(None),
     }
