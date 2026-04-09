@@ -131,6 +131,7 @@ pub fn create_workspace(conn: &Connection, workspace_name: String) -> Result<Wor
         token: None,
         instance: None,
         last_sync_at: chrono::DateTime::<chrono::Utc>::MIN_UTC.timestamp(),
+        latest_note_id: None,
     };
 
     workspace.insert(conn).context("Failed to save new workspace")?;
@@ -189,20 +190,6 @@ pub fn get_logged_workspace(conn: &Connection) -> Result<Option<Workspace>> {
                 .ok_or_else(|| anyhow::anyhow!("Logged workspace no longer exists in database"))?;
             Ok(Some(workspace))
         }
-        None => Ok(None),
-    }
-}
-
-pub fn set_latest_note(conn: &Connection, uuid: Option<String>) -> Result<()> {
-    match uuid {
-        Some(uuid) => common_insert_or_update(conn, "latest_note".to_string(), uuid),
-        None => Common::delete(conn, "latest_note".to_string()),
-    }
-}
-
-pub fn get_latest_note(conn: &Connection) -> Result<Option<String>> {
-    match Common::select(conn, "latest_note".to_string()).context("Failed to read latest note")? {
-        Some(lu) => Ok(Some(lu.value)),
         None => Ok(None),
     }
 }

@@ -165,6 +165,7 @@ pub struct Workspace {
     pub token: Option<Vec<u8>>,
     pub instance: Option<String>,
     pub last_sync_at: i64,
+    pub latest_note_id: Option<String>,
 }
 
 impl Workspace {
@@ -180,7 +181,8 @@ impl Workspace {
                 encrypted_mek_recovery BLOB,
                 token TEXT,
                 instance TEXT,
-                last_sync_at INTEGER NOT NULL DEFAULT -9223372036854775808
+                last_sync_at INTEGER NOT NULL DEFAULT -9223372036854775808,
+                latest_note_id TEXT
             )",
             (),
         )
@@ -191,8 +193,8 @@ impl Workspace {
 
     pub fn insert(&self, conn: &Connection) -> Result<()> {
         conn.execute(
-            "INSERT INTO workspace (workspace_name, username, master_encryption_key, salt_recovery_data, mek_recovery_nonce, encrypted_mek_recovery, token, instance, last_sync_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            (&self.workspace_name, &self.username, &self.master_encryption_key.to_vec(), &self.salt_recovery_data, &self.mek_recovery_nonce, &self.encrypted_mek_recovery, &self.token, &self.instance, &self.last_sync_at),
+            "INSERT INTO workspace (workspace_name, username, master_encryption_key, salt_recovery_data, mek_recovery_nonce, encrypted_mek_recovery, token, instance, last_sync_at, latest_note_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            (&self.workspace_name, &self.username, &self.master_encryption_key.to_vec(), &self.salt_recovery_data, &self.mek_recovery_nonce, &self.encrypted_mek_recovery, &self.token, &self.instance, &self.last_sync_at, &self.latest_note_id),
         )
         .context("Failed to insert workspace")?;
 
@@ -228,6 +230,7 @@ impl Workspace {
                     token: row.get(7)?,
                     instance: row.get(8)?,
                     last_sync_at: row.get(9)?,
+                    latest_note_id: row.get(10)?,
                 })
             },
         ) {
@@ -270,6 +273,7 @@ impl Workspace {
                     token: row.get(7)?,
                     instance: row.get(8)?,
                     last_sync_at: row.get(9)?,
+                    latest_note_id: row.get(10)?,
                 })
             })
             .context("Failed to query workspaces")?
@@ -281,10 +285,20 @@ impl Workspace {
 
     pub fn update(&self, conn: &Connection) -> Result<()> {
         conn.execute(
-            "UPDATE workspace SET workspace_name = ?, username = ?, master_encryption_key = ?, salt_recovery_data = ?, mek_recovery_nonce = ?, encrypted_mek_recovery = ?, token = ?, instance = ?, last_sync_at = ? WHERE id = ?",
-            (&self.workspace_name, &self.username, &self.master_encryption_key.to_vec(), &self.salt_recovery_data, &self.mek_recovery_nonce, &self.encrypted_mek_recovery, &self.token, &self.instance, &self.last_sync_at, &self.id),
+            "UPDATE workspace SET workspace_name = ?, username = ?, master_encryption_key = ?, salt_recovery_data = ?, mek_recovery_nonce = ?, encrypted_mek_recovery = ?, token = ?, instance = ?, last_sync_at = ?, latest_note_id = ? WHERE id = ?",
+            (&self.workspace_name, &self.username, &self.master_encryption_key.to_vec(), &self.salt_recovery_data, &self.mek_recovery_nonce, &self.encrypted_mek_recovery, &self.token, &self.instance, &self.last_sync_at, &self.latest_note_id, &self.id),
         )
         .context("Failed to update workspace")?;
+
+        Ok(())
+    }
+
+    pub fn update_latest_note(conn: &Connection, workspace_id: u32, uuid: Option<&str>) -> Result<()> {
+        conn.execute(
+            "UPDATE workspace SET latest_note_id = ? WHERE id = ?",
+            (uuid, workspace_id),
+        )
+        .context("Failed to update latest note on workspace")?;
 
         Ok(())
     }

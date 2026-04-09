@@ -306,8 +306,10 @@ export default function Home() {
   }, [currentNote]);
 
   useEffect(() => {
-    get_notes_metadata();
-    get_latest_note();
+    if(workspace) {
+      get_notes_metadata();
+      get_latest_note();
+    }
   }, [workspace]);
 
   // Clear currentNote if it was removed or its deleted status no longer matches the current tab
