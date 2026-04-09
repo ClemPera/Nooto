@@ -40,7 +40,7 @@ pub async fn run(handle: AppHandle) {
                         Ok(max_ts) => {
                             if let Some(ts) = max_ts {
                                 if let Err(e) = update_last_sync(&state, workspace.clone(), ts).await {
-                                    error!("Failed to persist sync timestamp: {e:#}");
+                                    error!("{e:#}");
                                     break 'sync;
                                 }
                             }
@@ -61,7 +61,7 @@ pub async fn run(handle: AppHandle) {
                         Ok(max_ts) => {
                             if let Some(ts) = max_ts {
                                 if let Err(e) = update_last_sync(&state, workspace.clone(), ts).await {
-                                    error!("Failed to persist sync timestamp: {e:#}");
+                                    error!("{e:#}");
                                     break 'sync;
                                 }
                             }
