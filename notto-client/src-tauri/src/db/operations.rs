@@ -51,6 +51,8 @@ pub fn create_note(
 }
 
 pub fn get_note(conn: &Connection, uuid: String, mek: Key<Aes256Gcm>) -> Result<NoteData> {
+    trace!("getting note {uuid}");
+
     let note = Note::select(conn, uuid.clone())
         .context("Failed to read note from database")?
         .ok_or_else(|| anyhow::anyhow!("Note '{}' not found", uuid))?;
