@@ -667,3 +667,80 @@ pub async fn handle_conflict(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aes_gcm::{Aes256Gcm, KeyInit};
+    use argon2::password_hash::rand_core::OsRng;
+
+    fn random_key() -> aes_gcm::Key<Aes256Gcm> {
+        Aes256Gcm::generate_key(OsRng)
+    }
+
+    fn dummy_workspace(name: &str) -> Workspace {
+        Workspace {
+            id: 7,
+            workspace_name: name.to_string(),
+            username: Some("alice".to_string()),
+            master_encryption_key: random_key(),
+            salt_recovery_data: "salt".to_string(),
+            mek_recovery_nonce: vec![],
+            encrypted_mek_recovery: vec![],
+            token: None,
+            instance: None,
+            last_sync_at: 0,
+            latest_note_id: None,
+        }
+    }
+
+    // --- CommandError constructors ---
+
+    #[test]
+    fn command_error_unauthorized_has_correct_kind() {
+        let e = CommandError::unauthorized("not logged in");
+        assert!(matches!(e.kind, ErrorKind::Unauthorized));
+        assert_eq!(e.message, "not logged in");
+    }
+
+    #[test]
+    fn command_error_not_found_has_correct_kind() {
+        let e = CommandError::not_found("note missing");
+        assert!(matches!(e.kind, ErrorKind::NotFound));
+        assert_eq!(e.message, "note missing");
+    }
+
+    #[test]
+    fn command_error_invalid_input_has_correct_kind() {
+        let e = CommandError::invalid_input("empty name");
+        assert!(matches!(e.kind, ErrorKind::InvalidInput));
+        assert_eq!(e.message, "empty name");
+    }
+
+    // --- From<anyhow::Error> ---
+
+    #[test]
+    fn command_error_from_plain_anyhow_is_internal() {
+        let e: CommandError = anyhow::anyhow!("db error").into();
+        assert!(matches!(e.kind, ErrorKind::Internal));
+    }
+
+    #[test]
+    fn command_error_from_reqwest_error_is_network() {
+        // Build a reqwest::Error by triggering a URL parse failure wrapped in anyhow.
+        let reqwest_err = reqwest::blocking::get("not-a-valid-url://bad").unwrap_err();
+        let anyhow_err = anyhow::Error::new(reqwest_err);
+        let e: CommandError = anyhow_err.into();
+        assert!(matches!(e.kind, ErrorKind::Network));
+    }
+
+    // --- FilteredWorkspace ---
+
+    #[test]
+    fn filtered_workspace_from_workspace() {
+        let ws = dummy_workspace("my_ws");
+        let filtered = FilteredWorkspace::from(ws);
+        assert_eq!(filtered.id, 7);
+        assert_eq!(filtered.workspace_name, "my_ws");
+    }
+}

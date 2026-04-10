@@ -377,3 +377,317 @@ impl Common {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aes_gcm::{Aes256Gcm, KeyInit};
+    use argon2::password_hash::rand_core::OsRng;
+
+    fn open_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        Note::create(&conn).unwrap();
+        Workspace::create(&conn).unwrap();
+        Common::create(&conn).unwrap();
+        conn
+    }
+
+    fn random_key() -> Key<Aes256Gcm> {
+        Aes256Gcm::generate_key(OsRng)
+    }
+
+    fn sample_workspace(name: &str) -> Workspace {
+        Workspace {
+            id: 0,
+            workspace_name: name.to_string(),
+            username: None,
+            master_encryption_key: random_key(),
+            salt_recovery_data: "salt".to_string(),
+            mek_recovery_nonce: vec![1, 2, 3],
+            encrypted_mek_recovery: vec![4, 5, 6],
+            token: None,
+            instance: None,
+            last_sync_at: 0,
+            latest_note_id: None,
+        }
+    }
+
+    fn sample_note(workspace_id: u32) -> Note {
+        Note {
+            uuid: "test-uuid-001".to_string(),
+            id_workspace: Some(workspace_id),
+            content: vec![1, 2, 3],
+            nonce: vec![4, 5, 6],
+            metadata: vec![7, 8, 9],
+            metadata_nonce: vec![10, 11, 12],
+            updated_at: 1700000000,
+            synched: false,
+            deleted: false,
+        }
+    }
+
+    // --- Note conversions ---
+
+    #[test]
+    fn note_from_shared_sets_synched_true() {
+        let shared = shared::Note {
+            uuid: "uuid".to_string(),
+            content: vec![],
+            nonce: vec![],
+            metadata: vec![],
+            metadata_nonce: vec![],
+            updated_at: 0,
+            deleted: false,
+        };
+        let note = Note::from(shared);
+        assert!(note.synched);
+        assert!(note.id_workspace.is_none());
+    }
+
+    #[test]
+    fn note_into_shared_drops_local_fields() {
+        let note = sample_note(1);
+        let shared: shared::Note = note.into();
+        assert_eq!(shared.uuid, "test-uuid-001");
+        assert_eq!(shared.content, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn note_roundtrip_from_shared_and_back() {
+        let original = shared::Note {
+            uuid: "roundtrip-uuid".to_string(),
+            content: vec![9, 8, 7],
+            nonce: vec![6, 5, 4],
+            metadata: vec![3, 2, 1],
+            metadata_nonce: vec![0],
+            updated_at: 42,
+            deleted: true,
+        };
+        let local = Note::from(original.clone());
+        let back: shared::Note = local.into();
+
+        assert_eq!(back.uuid, original.uuid);
+        assert_eq!(back.content, original.content);
+        assert_eq!(back.nonce, original.nonce);
+        assert_eq!(back.metadata, original.metadata);
+        assert_eq!(back.metadata_nonce, original.metadata_nonce);
+        assert_eq!(back.updated_at, original.updated_at);
+        assert_eq!(back.deleted, original.deleted);
+    }
+
+    // --- Note DB operations ---
+
+    #[test]
+    fn note_insert_and_select() {
+        let conn = open_db();
+        let ws = sample_workspace("ws1");
+        ws.insert(&conn).unwrap();
+        let ws_id = conn.last_insert_rowid() as u32;
+
+        let note = sample_note(ws_id);
+        note.insert(&conn).unwrap();
+
+        let fetched = Note::select(&conn, note.uuid.clone()).unwrap().unwrap();
+        assert_eq!(fetched.uuid, note.uuid);
+        assert_eq!(fetched.content, note.content);
+        assert_eq!(fetched.nonce, note.nonce);
+        assert_eq!(fetched.updated_at, note.updated_at);
+        assert_eq!(fetched.deleted, note.deleted);
+        assert!(!fetched.synched);
+    }
+
+    #[test]
+    fn note_select_missing_returns_none() {
+        let conn = open_db();
+        let result = Note::select(&conn, "nonexistent".to_string()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn note_update() {
+        let conn = open_db();
+        let ws = sample_workspace("ws1");
+        ws.insert(&conn).unwrap();
+        let ws_id = conn.last_insert_rowid() as u32;
+
+        let mut note = sample_note(ws_id);
+        note.insert(&conn).unwrap();
+
+        note.content = vec![99, 88, 77];
+        note.synched = true;
+        note.update(&conn).unwrap();
+
+        let fetched = Note::select(&conn, note.uuid.clone()).unwrap().unwrap();
+        assert_eq!(fetched.content, vec![99, 88, 77]);
+        assert!(fetched.synched);
+    }
+
+    #[test]
+    fn note_select_all_filters_by_workspace() {
+        let conn = open_db();
+        let ws1 = sample_workspace("ws1");
+        ws1.insert(&conn).unwrap();
+        let ws1_id = conn.last_insert_rowid() as u32;
+
+        let ws2 = sample_workspace("ws2");
+        ws2.insert(&conn).unwrap();
+        let ws2_id = conn.last_insert_rowid() as u32;
+
+        let mut note1 = sample_note(ws1_id);
+        note1.uuid = "uuid-1".to_string();
+        note1.insert(&conn).unwrap();
+
+        let mut note2 = sample_note(ws2_id);
+        note2.uuid = "uuid-2".to_string();
+        note2.insert(&conn).unwrap();
+
+        let ws1_notes = Note::select_all(&conn, ws1_id).unwrap();
+        assert_eq!(ws1_notes.len(), 1);
+        assert_eq!(ws1_notes[0].uuid, "uuid-1");
+    }
+
+    #[test]
+    fn note_delete_all_from_workspace() {
+        let conn = open_db();
+        let ws = sample_workspace("ws1");
+        ws.insert(&conn).unwrap();
+        let ws_id = conn.last_insert_rowid() as u32;
+
+        let mut note1 = sample_note(ws_id);
+        note1.uuid = "uuid-a".to_string();
+        note1.insert(&conn).unwrap();
+
+        let mut note2 = sample_note(ws_id);
+        note2.uuid = "uuid-b".to_string();
+        note2.insert(&conn).unwrap();
+
+        Note::delete_all_from_workspace(&conn, ws_id).unwrap();
+
+        assert!(Note::select_all(&conn, ws_id).unwrap().is_empty());
+    }
+
+    // --- Workspace DB operations ---
+
+    #[test]
+    fn workspace_insert_and_select() {
+        let conn = open_db();
+        let ws = sample_workspace("my_workspace");
+        ws.insert(&conn).unwrap();
+
+        let fetched = Workspace::select(&conn, "my_workspace".to_string())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(fetched.workspace_name, "my_workspace");
+        assert!(fetched.username.is_none());
+        assert_eq!(fetched.last_sync_at, 0);
+    }
+
+    #[test]
+    fn workspace_select_missing_returns_none() {
+        let conn = open_db();
+        let result = Workspace::select(&conn, "ghost".to_string()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn workspace_update() {
+        let conn = open_db();
+        let ws = sample_workspace("ws");
+        ws.insert(&conn).unwrap();
+        let id = conn.last_insert_rowid() as u32;
+
+        let mut ws = Workspace::select(&conn, "ws".to_string()).unwrap().unwrap();
+        ws.username = Some("alice".to_string());
+        ws.last_sync_at = 1234567890;
+        ws.update(&conn).unwrap();
+
+        let fetched = Workspace::select(&conn, "ws".to_string()).unwrap().unwrap();
+        assert_eq!(fetched.username, Some("alice".to_string()));
+        assert_eq!(fetched.last_sync_at, 1234567890);
+
+        let _ = id;
+    }
+
+    #[test]
+    fn workspace_update_latest_note() {
+        let conn = open_db();
+        let ws = sample_workspace("ws");
+        ws.insert(&conn).unwrap();
+        let id = conn.last_insert_rowid() as u32;
+
+        Workspace::update_latest_note(&conn, id, Some("some-note-uuid")).unwrap();
+
+        let fetched = Workspace::select(&conn, "ws".to_string()).unwrap().unwrap();
+        assert_eq!(fetched.latest_note_id, Some("some-note-uuid".to_string()));
+    }
+
+    #[test]
+    fn workspace_delete() {
+        let conn = open_db();
+        let ws = sample_workspace("ws_to_delete");
+        ws.insert(&conn).unwrap();
+        let id = conn.last_insert_rowid() as u32;
+
+        let ws = Workspace { id, ..sample_workspace("ws_to_delete") };
+        ws.delete(&conn).unwrap();
+
+        let result = Workspace::select(&conn, "ws_to_delete".to_string()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn workspace_select_all() {
+        let conn = open_db();
+        sample_workspace("ws1").insert(&conn).unwrap();
+        sample_workspace("ws2").insert(&conn).unwrap();
+
+        let all = Workspace::select_all(&conn).unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    // --- Common DB operations ---
+
+    #[test]
+    fn common_insert_and_select() {
+        let conn = open_db();
+        let entry = Common { key: "theme".to_string(), value: "dark".to_string() };
+        entry.insert(&conn).unwrap();
+
+        let fetched = Common::select(&conn, "theme".to_string()).unwrap().unwrap();
+        assert_eq!(fetched.value, "dark");
+    }
+
+    #[test]
+    fn common_select_missing_returns_none() {
+        let conn = open_db();
+        let result = Common::select(&conn, "nope".to_string()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn common_update() {
+        let conn = open_db();
+        let entry = Common { key: "lang".to_string(), value: "en".to_string() };
+        entry.insert(&conn).unwrap();
+
+        let mut updated = entry;
+        updated.value = "fr".to_string();
+        updated.update(&conn).unwrap();
+
+        let fetched = Common::select(&conn, "lang".to_string()).unwrap().unwrap();
+        assert_eq!(fetched.value, "fr");
+    }
+
+    #[test]
+    fn common_delete() {
+        let conn = open_db();
+        let entry = Common { key: "to_delete".to_string(), value: "val".to_string() };
+        entry.insert(&conn).unwrap();
+
+        Common::delete(&conn, "to_delete".to_string()).unwrap();
+
+        let result = Common::select(&conn, "to_delete".to_string()).unwrap();
+        assert!(result.is_none());
+    }
+}

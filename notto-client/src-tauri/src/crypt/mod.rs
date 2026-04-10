@@ -231,3 +231,114 @@ pub fn decrypt_data(ciphertext: &[u8], nonce: &[u8], key: &Key<Aes256Gcm>) -> Re
         .map_err(|e| anyhow::anyhow!("Decryption failed: {e}"))?;
     Ok(plaintext)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aes_gcm::{Aes256Gcm, KeyInit};
+    use argon2::password_hash::rand_core::{OsRng, RngCore};
+
+    fn random_key() -> Key<Aes256Gcm> {
+        Aes256Gcm::generate_key(OsRng)
+    }
+
+    // --- encrypt_data / decrypt_data ---
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let key = random_key();
+        let plaintext = b"hello, notto!";
+
+        let (ciphertext, nonce) = encrypt_data(plaintext, &key).unwrap();
+        let decrypted = decrypt_data(&ciphertext, &nonce, &key).unwrap();
+
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn encrypt_produces_different_nonces_each_call() {
+        let key = random_key();
+        let data = b"same data";
+
+        let (_, nonce1) = encrypt_data(data, &key).unwrap();
+        let (_, nonce2) = encrypt_data(data, &key).unwrap();
+
+        assert_ne!(nonce1, nonce2);
+    }
+
+    #[test]
+    fn encrypt_produces_different_ciphertexts_each_call() {
+        let key = random_key();
+        let data = b"same data";
+
+        let (ct1, _) = encrypt_data(data, &key).unwrap();
+        let (ct2, _) = encrypt_data(data, &key).unwrap();
+
+        assert_ne!(ct1, ct2);
+    }
+
+    #[test]
+    fn decrypt_with_wrong_key_fails() {
+        let key = random_key();
+        let wrong_key = random_key();
+        let plaintext = b"secret";
+
+        let (ciphertext, nonce) = encrypt_data(plaintext, &key).unwrap();
+        let result = decrypt_data(&ciphertext, &nonce, &wrong_key);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decrypt_with_tampered_ciphertext_fails() {
+        let key = random_key();
+        let (mut ciphertext, nonce) = encrypt_data(b"data", &key).unwrap();
+        ciphertext[0] ^= 0xFF;
+
+        let result = decrypt_data(&ciphertext, &nonce, &key);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn encrypt_empty_data_roundtrip() {
+        let key = random_key();
+        let (ciphertext, nonce) = encrypt_data(b"", &key).unwrap();
+        let decrypted = decrypt_data(&ciphertext, &nonce, &key).unwrap();
+        assert_eq!(decrypted, b"");
+    }
+
+    // --- decrypt_mek ---
+
+    #[test]
+    fn decrypt_mek_roundtrip() {
+        let password = "correct_password".to_string();
+        let mek = random_key();
+
+        let account_data = create_account(password.clone(), mek).unwrap();
+
+        let recovered_mek = decrypt_mek(
+            password,
+            account_data.encrypted_mek_password,
+            account_data.salt_data.to_string(),
+            account_data.mek_password_nonce,
+        )
+        .unwrap();
+
+        assert_eq!(mek.as_slice(), recovered_mek.as_slice());
+    }
+
+    #[test]
+    fn decrypt_mek_with_wrong_password_fails() {
+        let mek = random_key();
+        let account_data = create_account("correct".to_string(), mek).unwrap();
+
+        let result = decrypt_mek(
+            "wrong_password".to_string(),
+            account_data.encrypted_mek_password,
+            account_data.salt_data.to_string(),
+            account_data.mek_password_nonce,
+        );
+
+        assert!(result.is_err());
+    }
+}

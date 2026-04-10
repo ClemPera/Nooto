@@ -277,3 +277,131 @@ impl UserToken {
         .context("Failed to select user tokens")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_shared_note() -> shared::Note {
+        shared::Note {
+            uuid: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            content: vec![1, 2, 3, 4],
+            nonce: vec![5, 6, 7, 8],
+            metadata: vec![9, 10, 11],
+            metadata_nonce: vec![12, 13, 14],
+            updated_at: 1700000000,
+            deleted: false,
+        }
+    }
+
+    fn sample_shared_user() -> shared::User {
+        shared::User {
+            id: Some(42),
+            username: "alice".to_string(),
+            stored_password_hash: "hash_abc".to_string(),
+            stored_recovery_hash: "recovery_hash_abc".to_string(),
+            encrypted_mek_password: vec![1, 2, 3],
+            mek_password_nonce: vec![4, 5, 6],
+            encrypted_mek_recovery: vec![7, 8, 9],
+            mek_recovery_nonce: vec![10, 11, 12],
+            salt_auth: "salt_auth".to_string(),
+            salt_data: "salt_data".to_string(),
+            salt_recovery_auth: "salt_recovery_auth".to_string(),
+            salt_recovery_data: "salt_recovery_data".to_string(),
+            salt_server_auth: "salt_server_auth".to_string(),
+            salt_server_recovery: "salt_server_recovery".to_string(),
+        }
+    }
+
+    // --- Note conversions ---
+
+    #[test]
+    fn note_from_shared_preserves_fields() {
+        let shared = sample_shared_note();
+        let note = Note::from(shared.clone());
+
+        assert_eq!(note.uuid, shared.uuid);
+        assert_eq!(note.content, shared.content);
+        assert_eq!(note.nonce, shared.nonce);
+        assert_eq!(note.metadata, shared.metadata);
+        assert_eq!(note.metadata_nonce, shared.metadata_nonce);
+        assert_eq!(note.updated_at, shared.updated_at);
+        assert_eq!(note.deleted, shared.deleted);
+    }
+
+    #[test]
+    fn note_from_shared_sets_id_user_to_none() {
+        let note = Note::from(sample_shared_note());
+        assert!(note.id_user.is_none());
+    }
+
+    #[test]
+    fn note_into_shared_preserves_fields() {
+        let note = Note {
+            uuid: "test-uuid".to_string(),
+            id_user: Some(1),
+            content: vec![10, 20],
+            nonce: vec![30, 40],
+            metadata: vec![50, 60],
+            metadata_nonce: vec![70, 80],
+            updated_at: 9999,
+            deleted: true,
+        };
+
+        let shared: shared::Note = note.clone().into();
+
+        assert_eq!(shared.uuid, note.uuid);
+        assert_eq!(shared.content, note.content);
+        assert_eq!(shared.nonce, note.nonce);
+        assert_eq!(shared.metadata, note.metadata);
+        assert_eq!(shared.metadata_nonce, note.metadata_nonce);
+        assert_eq!(shared.updated_at, note.updated_at);
+        assert_eq!(shared.deleted, note.deleted);
+    }
+
+    #[test]
+    fn note_roundtrip_from_shared_and_back() {
+        let original = sample_shared_note();
+        let server_note = Note::from(original.clone());
+        let roundtripped: shared::Note = server_note.into();
+
+        assert_eq!(roundtripped.uuid, original.uuid);
+        assert_eq!(roundtripped.content, original.content);
+        assert_eq!(roundtripped.nonce, original.nonce);
+        assert_eq!(roundtripped.metadata, original.metadata);
+        assert_eq!(roundtripped.metadata_nonce, original.metadata_nonce);
+        assert_eq!(roundtripped.updated_at, original.updated_at);
+        assert_eq!(roundtripped.deleted, original.deleted);
+    }
+
+    // --- User conversion ---
+
+    #[test]
+    fn user_from_shared_preserves_all_fields() {
+        let shared = sample_shared_user();
+        let user = User::from(shared.clone());
+
+        assert_eq!(user.id, shared.id);
+        assert_eq!(user.username, shared.username);
+        assert_eq!(user.stored_password_hash, shared.stored_password_hash);
+        assert_eq!(user.stored_recovery_hash, shared.stored_recovery_hash);
+        assert_eq!(user.encrypted_mek_password, shared.encrypted_mek_password);
+        assert_eq!(user.mek_password_nonce, shared.mek_password_nonce);
+        assert_eq!(user.encrypted_mek_recovery, shared.encrypted_mek_recovery);
+        assert_eq!(user.mek_recovery_nonce, shared.mek_recovery_nonce);
+        assert_eq!(user.salt_auth, shared.salt_auth);
+        assert_eq!(user.salt_data, shared.salt_data);
+        assert_eq!(user.salt_recovery_auth, shared.salt_recovery_auth);
+        assert_eq!(user.salt_recovery_data, shared.salt_recovery_data);
+        assert_eq!(user.salt_server_auth, shared.salt_server_auth);
+        assert_eq!(user.salt_server_recovery, shared.salt_server_recovery);
+    }
+
+    #[test]
+    fn user_from_shared_without_id() {
+        let mut shared = sample_shared_user();
+        shared.id = None;
+        let user = User::from(shared);
+        assert!(user.id.is_none());
+    }
+}

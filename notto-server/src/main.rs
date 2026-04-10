@@ -269,7 +269,7 @@ async fn insert_user(
         .await
         .context("Failed to get DB connection")?;
 
-    if User::select(&mut conn, user.clone().username).await?.is_none() {
+    if User::select(&mut conn, user.clone().username).await?.is_some() {
         return Err(AppError::conflict("This username already exist"))
     }
 
@@ -340,4 +340,83 @@ async fn login(
         mek_password_nonce: user.mek_password_nonce,
         token: user_token.token,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::response::IntoResponse;
+
+    // --- AppError constructors ---
+
+    #[test]
+    fn app_error_internal_returns_500() {
+        let e = AppError::internal(anyhow::anyhow!("boom"));
+        assert_eq!(e.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(e.message, "Internal server error");
+    }
+
+    #[test]
+    fn app_error_not_found() {
+        let e = AppError::not_found("missing resource");
+        assert_eq!(e.status, StatusCode::NOT_FOUND);
+        assert_eq!(e.message, "missing resource");
+    }
+
+    #[test]
+    fn app_error_unauthorized() {
+        let e = AppError::unauthorized("bad credentials");
+        assert_eq!(e.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(e.message, "bad credentials");
+    }
+
+    #[test]
+    fn app_error_forbidden() {
+        let e = AppError::forbidden();
+        assert_eq!(e.status, StatusCode::FORBIDDEN);
+        assert_eq!(e.message, "Forbidden");
+    }
+
+    #[test]
+    fn app_error_unprocessable() {
+        let e = AppError::unprocessable();
+        assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn app_error_conflict() {
+        let e = AppError::conflict("already exists");
+        assert_eq!(e.status, StatusCode::CONFLICT);
+        assert_eq!(e.message, "already exists");
+    }
+
+    #[test]
+    fn app_error_bad_request() {
+        let e = AppError::bad_request("invalid input");
+        assert_eq!(e.status, StatusCode::BAD_REQUEST);
+        assert_eq!(e.message, "invalid input");
+    }
+
+    // --- From<anyhow::Error> ---
+
+    #[test]
+    fn app_error_from_anyhow_is_internal() {
+        let e: AppError = anyhow::anyhow!("something failed").into();
+        assert_eq!(e.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(e.message, "Internal server error");
+    }
+
+    // --- IntoResponse ---
+
+    #[test]
+    fn app_error_into_response_has_correct_status() {
+        let e = AppError::not_found("nope");
+        assert_eq!(e.into_response().status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn app_error_internal_into_response_has_500() {
+        let e = AppError::internal(anyhow::anyhow!("internal"));
+        assert_eq!(e.into_response().status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
 }
