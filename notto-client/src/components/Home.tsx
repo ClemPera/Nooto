@@ -56,6 +56,7 @@ export default function Home() {
     if (inList && inList.deleted !== showDeleted) setCurrentNote(null);
   }, [showDeleted]);
 
+  /** Fetches all note metadata for the active workspace and updates the store. */
   function get_notes_metadata() {
     if (!workspace) return;
     trace("getting notes metadata from: " + workspace.id + " - " + workspace.workspace_name);
@@ -64,6 +65,7 @@ export default function Home() {
       .catch(handleCommandError);
   }
 
+  /** Opens the last note the user had open when a workspace loads. */
   function get_latest_note() {
     if (currentNote) return;
     invoke("get_latest_note_id")
@@ -71,6 +73,7 @@ export default function Home() {
       .catch(handleCommandError);
   }
 
+  /** Fetches the full decrypted content of a note and sets it as the current note. */
   async function get_note(id: string) {
     await invoke("get_note", { id })
       .then((note) => {
@@ -80,6 +83,7 @@ export default function Home() {
       .catch(handleCommandError);
   }
 
+  /** Creates a new note under `parent_id` and immediately opens it. */
   async function create_note(parent_id: string | null = null) {
     await invoke("create_note", { title: "New Note", parent_id })
       .then((uuid) => get_note(uuid as string))
@@ -87,12 +91,14 @@ export default function Home() {
     get_notes_metadata();
   }
 
+  /** Creates a new folder under `parent_id` and refreshes the note tree. */
   async function create_folder(parent_id: string | null = null) {
     await invoke("create_folder", { title: "New Folder", parent_id })
       .then(() => get_notes_metadata())
       .catch(handleCommandError);
   }
 
+  /** Toggles a folder's open/closed state in the sidebar. */
   async function toggle_folder(note: Note) {
     invoke("get_note", { id: note.id })
       .then((full: any) =>
@@ -102,6 +108,7 @@ export default function Home() {
       .catch(handleCommandError);
   }
 
+  /** Saves updated note content; skips the call if content hasn't changed. */
   async function edit_note(content: string) {
     if (!currentNote || currentNote.content === content) return;
     const note: NoteContent = { ...currentNote, content };
@@ -109,6 +116,7 @@ export default function Home() {
     invoke("edit_note", { note }).catch(handleCommandError);
   }
 
+  /** Updates the note title and refreshes the sidebar metadata. */
   async function edit_note_title(title: string) {
     const note: NoteContent = { ...currentNote!, title };
     setCurrentNote(note);
@@ -116,12 +124,14 @@ export default function Home() {
     get_notes_metadata();
   }
 
+  /** Restores a soft-deleted note and clears the current selection. */
   async function restore_note(id: string) {
     await invoke("restore_note", { id }).catch(handleCommandError);
     setCurrentNote(null);
     get_notes_metadata();
   }
 
+  /** Moves a note or folder to a new parent (drag-and-drop handler). */
   async function move_item(id: string, newParentId: string | null) {
     invoke("get_note", { id })
       .then((full: any) =>

@@ -6,6 +6,7 @@ use mysql_async::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Server-side note row as stored in the `note` table.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Note {
     pub uuid: String,
@@ -65,6 +66,7 @@ impl Into<shared::Note> for Note {
 impl Note {
     //TODO: pub async fn create(&self, conn: &mut Conn) {}
 
+    /// Fetches a single note by user ID and UUID. Returns `None` if not found.
     pub async fn select(conn: &mut Conn, id_user: u32, uuid: String) -> Result<Option<Self>> {
         conn.exec_first(
             "SELECT * FROM note WHERE id_user = :id_user AND uuid = :uuid",
@@ -77,6 +79,7 @@ impl Note {
         .context("Failed to select note")
     }
 
+    /// Inserts a new note row. `updated_at` is set to the current server timestamp.
     pub async fn insert(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
             "INSERT INTO note (uuid, id_user, content, nonce, metadata, metadata_nonce, updated_at, deleted) \
@@ -96,6 +99,7 @@ impl Note {
         .context("Failed to insert note")
     }
 
+    /// Updates an existing note's content, metadata, and timestamps. `updated_at` is set to now.
     pub async fn update(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
             "UPDATE note \
@@ -115,6 +119,7 @@ impl Note {
         .context("Failed to update note")
     }
 
+    /// Returns all notes for a user updated after `after_datetime` (Unix timestamp).
     pub async fn select_all_from_user(
         conn: &mut Conn,
         id_user: u32,
@@ -132,6 +137,7 @@ impl Note {
     }
 }
 
+/// Server-side user row as stored in the `user` table.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct User {
     pub id: Option<u32>,
@@ -195,6 +201,7 @@ impl From<shared::User> for User {
 impl User {
     //TODO: pub async fn create(&self, conn: &mut Conn) {}
 
+    /// Fetches a user by username. Returns `None` if not found.
     pub async fn select(conn: &mut Conn, username: String) -> Result<Option<Self>> {
         conn.exec_first(
             "SELECT * FROM user WHERE username = :username",
@@ -206,6 +213,7 @@ impl User {
         .context("Failed to select user")
     }
 
+    /// Inserts a new user row with all encryption material.
     pub async fn insert(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
             "INSERT INTO user (username, stored_password_hash, stored_recovery_hash, encrypted_mek_password, mek_password_nonce,
@@ -233,6 +241,7 @@ impl User {
     }
 }
 
+/// Session token row linking a random token to a user.
 #[derive(Deserialize, Serialize, Debug)]
 pub struct UserToken {
     pub id: Option<u32>,
@@ -253,6 +262,7 @@ impl FromRow for UserToken {
 impl UserToken {
     //TODO: pub async fn create(&self, conn: &mut Conn) {}
 
+    /// Inserts a new session token for the user.
     pub async fn insert(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
             "INSERT INTO user_token (id_user, token) \
@@ -266,6 +276,7 @@ impl UserToken {
         .context("Failed to insert user token")
     }
 
+    /// Returns all session tokens for the given user ID.
     pub async fn select(conn: &mut Conn, id: u32) -> Result<Vec<Self>> {
         conn.exec(
             "SELECT * FROM user_token WHERE id_user = :id_user",

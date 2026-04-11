@@ -26,6 +26,7 @@ pub struct AppError {
 
 //TODO: impl logging (info for most error)
 impl AppError {
+    /// Logs the full error chain and returns a generic 500 to avoid leaking internals.
     pub fn internal(err: anyhow::Error) -> Self {
         eprintln!("Internal error: {err:#}");
         AppError {
@@ -34,18 +35,22 @@ impl AppError {
         }
     }
 
+    /// 404 with a caller-supplied message.
     pub fn not_found(msg: impl Into<String>) -> Self {
         AppError { status: StatusCode::NOT_FOUND, message: msg.into() }
     }
 
+    /// 401 with a caller-supplied message.
     pub fn unauthorized(msg: impl Into<String>) -> Self {
         AppError { status: StatusCode::UNAUTHORIZED, message: msg.into() }
     }
 
+    /// 403 — used when the token is present but doesn't match.
     pub fn forbidden() -> Self {
         AppError { status: StatusCode::FORBIDDEN, message: "Forbidden".to_string() }
     }
 
+    /// 422 — used when an expected entity (e.g. the user record) is missing mid-request.
     pub fn unprocessable() -> Self {
         AppError {
             status: StatusCode::UNPROCESSABLE_ENTITY,
@@ -53,10 +58,12 @@ impl AppError {
         }
     }
     
+    /// 409 — used when a resource already exists (e.g. duplicate username).
     pub fn conflict(msg: impl Into<String>) -> Self {
         AppError { status: StatusCode::CONFLICT, message: msg.into() }
     }
 
+    /// 400 with a caller-supplied message (e.g. malformed token).
     pub fn bad_request(msg: impl Into<String>) -> Self {
         AppError { status: StatusCode::BAD_REQUEST, message: msg.into() }
     }
@@ -107,6 +114,8 @@ async fn main() {
         .expect("Server error");
 }
 
+/// Verifies that `token` matches one of the stored tokens for `username`.
+/// Returns `Forbidden` if no token matches, or `Unprocessable` if the user doesn't exist.
 async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Result<(), AppError> {
     //TODO: this could return user honestly
     let user = schema::User::select(conn, username)
@@ -129,6 +138,8 @@ async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Resul
     Err(AppError::forbidden())
 }
 
+/// `POST /notes` — upserts a batch of notes for the authenticated user.
+/// Returns per-note results; conflicting notes (server newer and `force` is false) are flagged.
 async fn send_notes(
     State(pool): State<Pool>,
     Json(sent_notes): Json<shared::SentNotes>,
@@ -194,6 +205,7 @@ async fn send_notes(
     Ok(Json(result))
 }
 
+/// `GET /notes` — returns all notes for the authenticated user updated after `params.updated_at`.
 async fn select_notes(
     State(pool): State<Pool>,
     Query(params): Query<shared::SelectNotesParams>,
@@ -228,6 +240,7 @@ async fn select_notes(
     Ok(Json(notes))
 }
 
+/// `GET /note` — returns a single note by UUID for the authenticated user.
 async fn select_note(
     State(pool): State<Pool>,
     Query(params): Query<shared::SelectNoteParams>,
@@ -257,6 +270,7 @@ async fn select_note(
     Ok(Json(note.into()))
 }
 
+/// `POST /create_account` — registers a new user. Returns 409 if the username is taken.
 async fn insert_user(
     State(pool): State<Pool>,
     Json(user): Json<shared::User>,
@@ -280,6 +294,7 @@ async fn insert_user(
     Ok(())
 }
 
+/// `GET /login` — returns the salts the client needs to derive its login hash.
 async fn login_request(
     State(pool): State<Pool>,
     Query(params): Query<shared::LoginRequestParams>,
@@ -300,6 +315,8 @@ async fn login_request(
     }))
 }
 
+/// `POST /login` — validates the login hash, issues a new session token, and returns the
+/// material needed to decrypt the master encryption key client-side.
 #[axum::debug_handler]
 async fn login(
     State(pool): State<Pool>,

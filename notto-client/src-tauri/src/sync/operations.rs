@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use shared::{LoginRequestParams, Note, SelectNoteParams, SelectNotesParams, SentNotes, User};
 use tauri_plugin_log::log::{debug, trace};
 
+/// `POST /notes` — uploads a batch of notes and returns per-note results (Ok or Conflict).
 pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared::SentNotesResult>> {
     let client = reqwest::Client::new();
 
@@ -20,6 +21,7 @@ pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared
         .context("Failed to parse server response")
 }
 
+/// `GET /notes` — fetches notes updated after the timestamp in `params`.
 pub async fn select_notes(params: SelectNotesParams, instance: String) -> Result<Vec<Note>> {
     let client = reqwest::Client::new();
 
@@ -38,6 +40,7 @@ pub async fn select_notes(params: SelectNotesParams, instance: String) -> Result
         .context("Failed to parse server response")
 }
 
+/// `GET /note` — fetches a single note by UUID.
 pub async fn select_note(params: SelectNoteParams, instance: String) -> Result<Note> {
     let client = reqwest::Client::new();
 
@@ -56,6 +59,7 @@ pub async fn select_note(params: SelectNoteParams, instance: String) -> Result<N
         .context("Failed to parse server response")
 }
 
+/// `POST /create_account` — registers a new user on the server.
 pub async fn create_account(user: User, instance: String) -> Result<()> {
     let client = reqwest::Client::new();
 
@@ -71,6 +75,7 @@ pub async fn create_account(user: User, instance: String) -> Result<()> {
     Ok(())
 }
 
+/// `GET /login` — retrieves the salts needed to derive the login hash before authenticating.
 pub async fn login_request(params: LoginRequestParams, instance: String) -> Result<shared::LoginRequest> {
     let client = reqwest::Client::new();
 
@@ -89,6 +94,7 @@ pub async fn login_request(params: LoginRequestParams, instance: String) -> Resu
         .context("Failed to parse login request response")
 }
 
+/// `POST /login` — submits the login hash and returns the session token and MEK material.
 pub async fn login(params: shared::LoginParams, instance: String) -> Result<shared::Login> {
     let client = reqwest::Client::new();
 

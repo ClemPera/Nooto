@@ -11,8 +11,11 @@ export type Toast = {
 
 type ToastsStore = {
   toasts: Toast[];
+  /** Adds a toast and schedules auto-dismissal for non-critical kinds. */
   addToast: (toast: Omit<Toast, "id" | "dismissing">) => void;
+  /** Triggers the exit animation then removes the toast after `EXIT_ANIMATION_MS`. */
   dismissToast: (id: string) => void;
+  /** Immediately removes a toast from the list (called after the exit animation). */
   removeToast: (id: string) => void;
 };
 
@@ -20,6 +23,7 @@ const AUTO_DISMISS_KINDS: ErrorKind[] = ["not_found", "network", "invalid_input"
 const AUTO_DISMISS_MS = 4000;
 const EXIT_ANIMATION_MS = 350;
 
+/** Store for the toast notification queue. Internal kinds auto-dismiss after `AUTO_DISMISS_MS`. */
 export const useToasts = create<ToastsStore>((set, get) => ({
   toasts: [],
 

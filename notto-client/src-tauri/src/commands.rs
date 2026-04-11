@@ -37,16 +37,19 @@ pub struct CommandError {
 }
 
 impl CommandError {
+    /// No workspace loaded or user not authenticated.
     pub fn unauthorized(msg: impl Into<String> + Clone) -> Self {
         error!("Unauthorized: {}", msg.clone().into());
         CommandError { kind: ErrorKind::Unauthorized, message: msg.into() }
     }
 
+    /// The requested note or workspace does not exist.
     pub fn not_found(msg: impl Into<String> + Clone) -> Self {
         error!("NotFound: {}", msg.clone().into());
         CommandError { kind: ErrorKind::NotFound, message: msg.into() }
     }
 
+    /// The caller supplied a value that failed basic validation (e.g. bad UUID).
     pub fn invalid_input(msg: impl Into<String> + Clone) -> Self {
         error!("InvalidInput: {}", msg.clone().into());
         CommandError { kind: ErrorKind::InvalidInput, message: msg.into() }
@@ -66,6 +69,7 @@ impl From<anyhow::Error> for CommandError {
     }
 }
 
+/// Workspace data safe to expose to the frontend (MEK and credentials are omitted).
 #[derive(Debug, Serialize)]
 pub struct FilteredWorkspace {
     pub id: u32,
@@ -81,6 +85,7 @@ impl From<Workspace> for FilteredWorkspace {
     }
 }
 
+/// Decrypted note metadata returned by `get_all_notes_metadata` (no content).
 #[derive(Debug, Serialize)]
 pub struct NoteMetadata {
     pub id: String,
@@ -93,6 +98,8 @@ pub struct NoteMetadata {
 }
 
 impl NoteMetadata {
+    /// Decrypts a raw DB note into its metadata using the workspace MEK.
+    /// Converts `updated_at` from Unix seconds to milliseconds for the frontend.
     pub fn from_note(note: Note, key: &aes_gcm::Key<aes_gcm::Aes256Gcm>) -> anyhow::Result<Self> {
         let metadata_plaintext = crypt::decrypt_data(&note.metadata, &note.metadata_nonce, key)
             .context("Failed to decrypt note metadata")?;
@@ -140,6 +147,7 @@ impl From<NoteData> for NoteResponse {
     }
 }
 
+/// Loads the previously logged workspace into the app state on startup.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn init(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
     let mut state = state.lock().await;
@@ -154,6 +162,7 @@ pub async fn init(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError>
     Ok(())
 }
 
+/// Creates a new note with an empty body and returns its UUID.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn create_note(
     state: State<'_, Mutex<AppState>>,
@@ -180,6 +189,7 @@ pub async fn create_note(
     Ok(note_uuid)
 }
 
+/// Creates a new folder note and returns its UUID.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn create_folder(
     state: State<'_, Mutex<AppState>>,
@@ -206,6 +216,7 @@ pub async fn create_folder(
     Ok(folder_uuid)
 }
 
+/// Fetches, decrypts, and returns a single note by UUID. Also updates the workspace's latest note.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn get_note(
     state: State<'_, Mutex<AppState>>,
@@ -229,6 +240,7 @@ pub async fn get_note(
     Ok(NoteResponse::from(note))
 }
 
+/// Re-encrypts and saves updated note content and metadata. Marks the note as unsynced.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn edit_note(
     state: State<'_, Mutex<AppState>>,
@@ -247,6 +259,7 @@ pub async fn edit_note(
     Ok(())
 }
 
+/// Returns decrypted metadata for all notes in the workspace (no content).
 #[tauri::command(rename_all = "snake_case")]
 pub async fn get_all_notes_metadata(
     state: State<'_, Mutex<AppState>>,
@@ -270,6 +283,7 @@ pub async fn get_all_notes_metadata(
     Ok(notes_metadata)
 }
 
+/// Generates encryption keys, creates a new workspace, and sets it as active.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn create_workspace(
     state: State<'_, Mutex<AppState>>,
@@ -289,6 +303,7 @@ pub async fn create_workspace(
     Ok(())
 }
 
+/// Returns a list of all locally stored workspaces (credentials omitted).
 #[tauri::command(rename_all = "snake_case")]
 pub async fn get_workspaces(
     state: State<'_, Mutex<AppState>>,
@@ -303,6 +318,7 @@ pub async fn get_workspaces(
     Ok(filtered)
 }
 
+/// Switches the active workspace, persisting the choice to the database.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn set_logged_workspace(
     state: State<'_, Mutex<AppState>>,
@@ -332,6 +348,7 @@ pub async fn set_logged_workspace(
     Ok(FilteredWorkspace::from(workspace))
 }
 
+/// Returns the currently active workspace from in-memory state, or `None` if none is loaded.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn get_logged_workspace(
     state: State<'_, Mutex<AppState>>,
@@ -344,6 +361,8 @@ pub async fn get_logged_workspace(
     }
 }
 
+/// Derives account encryption material and registers the user on the server.
+/// A workspace must be loaded first; login must be called separately afterwards.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn sync_create_account(
     state: State<'_, Mutex<AppState>>,
@@ -376,6 +395,8 @@ pub async fn sync_create_account(
     Ok(())
 }
 
+/// Authenticates with the server, decrypts the MEK, re-encrypts all local notes with it,
+/// and persists the session token and instance URL to the workspace.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn sync_login(
     state: State<'_, Mutex<AppState>>,
@@ -446,6 +467,7 @@ pub async fn sync_login(
     Ok(())
 }
 
+/// Clears server credentials (token, instance, username) from the workspace without deleting notes.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
     let mut state = state.lock().await;
@@ -468,6 +490,7 @@ pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), Comman
     Ok(())
 }
 
+/// Fully removes the active workspace and all its notes from local storage.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
     let mut state = state.lock().await;
@@ -487,11 +510,13 @@ pub async fn logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandErro
     Ok(())
 }
 
+/// Returns the application version string from `Cargo.toml`.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn get_version(_state: State<'_, Mutex<AppState>>) -> Result<&'static str, CommandError> {
     Ok(env!("CARGO_PKG_VERSION"))
 }
 
+/// Soft-deletes a note by setting its `deleted` flag (it remains locally until synced).
 #[tauri::command(rename_all = "snake_case")]
 pub async fn delete_note(
     state: State<'_, Mutex<AppState>>,
@@ -516,6 +541,7 @@ pub async fn delete_note(
     Ok(())
 }
 
+/// Restores a soft-deleted note by clearing its `deleted` flag.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn restore_note(
     state: State<'_, Mutex<AppState>>,
@@ -538,6 +564,7 @@ pub async fn restore_note(
     Ok(())
 }
 
+/// Returns the UUID of the last note the user had open, used to restore state on startup.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn get_latest_note_id(
     state: State<'_, Mutex<AppState>>,
@@ -552,6 +579,9 @@ pub async fn get_latest_note_id(
     Ok(workspace.latest_note_id)
 }
 
+/// Resolves a sync conflict for a note.
+/// `local=true` force-pushes the local version to the server;
+/// `local=false` fetches the server version and overwrites the local copy.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn handle_conflict(
     state: State<'_, Mutex<AppState>>,

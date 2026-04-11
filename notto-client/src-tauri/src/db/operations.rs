@@ -11,6 +11,7 @@ use crate::{
 };
 
 //TODO: refactor this, data encryption and stuff should not be inside db?
+/// Creates a new note (or folder) with encrypted empty content, stores it and returns its UUID.
 pub fn create_note(
     conn: &Connection,
     id_workspace: u32,
@@ -50,6 +51,7 @@ pub fn create_note(
     Ok(note.uuid)
 }
 
+/// Fetches and decrypts a note by UUID, returning plaintext `NoteData`.
 pub fn get_note(conn: &Connection, uuid: String, mek: Key<Aes256Gcm>) -> Result<NoteData> {
     trace!("getting note {uuid}");
 
@@ -79,10 +81,12 @@ pub fn get_note(conn: &Connection, uuid: String, mek: Key<Aes256Gcm>) -> Result<
     Ok(decrypted_note)
 }
 
+/// Returns all raw (encrypted) note rows for the given workspace.
 pub fn get_notes(conn: &Connection, id_workspace: u32) -> Result<Vec<Note>> {
     Note::select_all(conn, id_workspace).context("Failed to read notes from database")
 }
 
+/// Re-encrypts and saves updated note data. Marks the note as unsynced.
 pub fn update_note(conn: &Connection, note_data: NoteData, mek: Key<Aes256Gcm>) -> Result<()> {
     let (content, nonce) = crypt::encrypt_data(note_data.content.as_bytes(), &mek)
         .context("Failed to encrypt note content")?;
@@ -116,6 +120,7 @@ pub fn update_note(conn: &Connection, note_data: NoteData, mek: Key<Aes256Gcm>) 
     Ok(())
 }
 
+/// Generates encryption keys for a new workspace, inserts it, and returns the full record.
 pub fn create_workspace(conn: &Connection, workspace_name: String) -> Result<Workspace> {
     let workspace_encryption_data =
         crypt::create_workspace().context("Failed to generate workspace encryption data")?;
@@ -146,18 +151,22 @@ pub fn create_workspace(conn: &Connection, workspace_name: String) -> Result<Wor
     Ok(workspace)
 }
 
+/// Persists all fields of an existing workspace back to the database.
 pub fn update_workspace(conn: &Connection, new_workspace: Workspace) -> Result<()> {
     new_workspace.update(conn).context("Failed to update workspace")
 }
 
+/// Fetches a workspace by name. Returns `None` if not found.
 pub fn get_workspace(conn: &Connection, workspace_name: String) -> Result<Option<Workspace>> {
     Workspace::select(conn, workspace_name).context("Failed to read workspace from database")
 }
 
+/// Returns all locally stored workspaces.
 pub fn get_workspaces(conn: &Connection) -> Result<Vec<Workspace>> {
     Workspace::select_all(conn).context("Failed to read workspaces from database")
 }
 
+/// Upserts a `Common` entry: updates the value if the key exists, otherwise inserts it.
 fn common_insert_or_update(conn: &Connection, key: String, value: String) -> Result<()> {
     match Common::select(conn, key.clone()).context("Failed to read common entry")? {
         Some(mut common) => {
@@ -173,6 +182,8 @@ fn common_insert_or_update(conn: &Connection, key: String, value: String) -> Res
     Ok(())
 }
 
+/// Persists the currently logged workspace name to the `common` table.
+/// Pass `None` to clear it (e.g. on logout).
 pub fn set_logged_workspace(conn: &Connection, workspace: Option<Workspace>) -> Result<()> {
     match workspace {
         Some(workspace) => {
@@ -182,6 +193,7 @@ pub fn set_logged_workspace(conn: &Connection, workspace: Option<Workspace>) -> 
     }
 }
 
+/// Reads the logged workspace name from `common` and returns the full workspace record.
 pub fn get_logged_workspace(conn: &Connection) -> Result<Option<Workspace>> {
     match Common::select(conn, "logged".to_string()).context("Failed to read logged workspace key")? {
         Some(lu) => {
@@ -194,6 +206,7 @@ pub fn get_logged_workspace(conn: &Connection) -> Result<Option<Workspace>> {
     }
 }
 
+/// Fully removes a workspace: deletes all its notes, the workspace row, and the logged key.
 pub fn logout_workspace(conn: &Connection, workspace_name: String) -> Result<()> {
     let workspace = Workspace::select(conn, workspace_name)
         .context("Failed to read workspace")?
@@ -207,6 +220,7 @@ pub fn logout_workspace(conn: &Connection, workspace_name: String) -> Result<()>
     Ok(())
 }
 
+/// Clears server credentials (username, token, instance) from a workspace without deleting notes.
 pub fn sync_logout_workspace(conn: &Connection, workspace_name: String) -> Result<()> {
     let mut workspace = Workspace::select(conn, workspace_name)
         .context("Failed to read workspace")?

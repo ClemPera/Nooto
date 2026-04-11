@@ -4,6 +4,7 @@ use rusqlite::Connection;
 
 use rusqlite::Error::QueryReturnedNoRows;
 
+/// Local SQLite note row (content and metadata are ciphertext blobs).
 #[derive(Debug)]
 pub struct Note {
     pub uuid: String,
@@ -48,9 +49,8 @@ impl Into<shared::Note> for Note {
 }
 
 impl Note {
+    /// Creates the `note` table if it does not already exist.
     pub fn create(conn: &Connection) -> Result<()> {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS note (
                 uuid BLOB PRIMARY KEY,
                 id_workspace INTEGER NOT NULL REFERENCES workspace(id),
                 content BLOB,
@@ -68,6 +68,7 @@ impl Note {
         Ok(())
     }
 
+    /// Fetches a note by UUID. Returns `None` if not found.
     pub fn select(conn: &Connection, uuid: String) -> Result<Option<Self>> {
         let note = match conn.query_one(
             "SELECT * FROM note WHERE uuid = ?",
@@ -93,6 +94,7 @@ impl Note {
         Ok(note)
     }
 
+    /// Inserts this note into the database.
     pub fn insert(&self, conn: &Connection) -> Result<()> {
         conn.execute(
             "INSERT INTO note (uuid, content, nonce, metadata, metadata_nonce, id_workspace, updated_at, synched, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -103,6 +105,7 @@ impl Note {
         Ok(())
     }
 
+    /// Updates the note's encrypted content, metadata, timestamps, and sync flag.
     pub fn update(&self, conn: &Connection) -> Result<()> {
         conn.execute(
             "UPDATE note SET content = ?, nonce = ?, metadata = ?, metadata_nonce = ?, updated_at = ?, synched = ?, deleted = ? WHERE uuid = ?",
@@ -113,6 +116,7 @@ impl Note {
         Ok(())
     }
 
+    /// Returns all notes belonging to `id_workspace`.
     pub fn select_all(conn: &Connection, id_workspace: u32) -> Result<Vec<Self>> {
         let mut stmt = conn
             .prepare("SELECT * FROM note WHERE id_workspace = ?")
@@ -139,6 +143,7 @@ impl Note {
         Ok(notes)
     }
 
+    /// Deletes all notes belonging to `id_workspace` (used on logout).
     pub fn delete_all_from_workspace(conn: &Connection, id_workspace: u32) -> Result<()> {
         conn.execute(
             "DELETE FROM note WHERE id_workspace = ?",
@@ -150,6 +155,7 @@ impl Note {
     }
 }
 
+/// Local workspace row — holds the MEK in plaintext and optional server credentials.
 #[derive(Debug, Clone)]
 pub struct Workspace {
     pub id: u32,
@@ -169,9 +175,8 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    /// Creates the `workspace` table if it does not already exist.
     pub fn create(conn: &Connection) -> Result<()> {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS workspace (
                 id INTEGER PRIMARY KEY,
                 workspace_name TEXT,
                 username TEXT,
@@ -191,6 +196,7 @@ impl Workspace {
         Ok(())
     }
 
+    /// Inserts this workspace into the database.
     pub fn insert(&self, conn: &Connection) -> Result<()> {
         conn.execute(
             "INSERT INTO workspace (workspace_name, username, master_encryption_key, salt_recovery_data, mek_recovery_nonce, encrypted_mek_recovery, token, instance, last_sync_at, latest_note_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
@@ -201,6 +207,7 @@ impl Workspace {
         Ok(())
     }
 
+    /// Fetches a workspace by name. Returns `None` if not found.
     pub fn select(conn: &Connection, workspace_name: String) -> Result<Option<Self>> {
         let workspace = match conn.query_one(
             "SELECT * FROM workspace WHERE workspace_name = ?",
@@ -242,6 +249,7 @@ impl Workspace {
         Ok(workspace)
     }
 
+    /// Returns all workspaces stored locally.
     pub fn select_all(conn: &Connection) -> Result<Vec<Self>> {
         let mut stmt = conn
             .prepare("SELECT * FROM workspace")
@@ -283,6 +291,7 @@ impl Workspace {
         Ok(workspaces)
     }
 
+    /// Persists all fields of this workspace back to the database.
     pub fn update(&self, conn: &Connection) -> Result<()> {
         conn.execute(
             "UPDATE workspace SET workspace_name = ?, username = ?, master_encryption_key = ?, salt_recovery_data = ?, mek_recovery_nonce = ?, encrypted_mek_recovery = ?, token = ?, instance = ?, last_sync_at = ?, latest_note_id = ? WHERE id = ?",
@@ -293,6 +302,7 @@ impl Workspace {
         Ok(())
     }
 
+    /// Updates only the `latest_note_id` column for the given workspace.
     pub fn update_latest_note(conn: &Connection, workspace_id: u32, uuid: Option<&str>) -> Result<()> {
         conn.execute(
             "UPDATE workspace SET latest_note_id = ? WHERE id = ?",
@@ -303,6 +313,7 @@ impl Workspace {
         Ok(())
     }
 
+    /// Deletes this workspace row from the database.
     pub fn delete(&self, conn: &Connection) -> Result<()> {
         conn.execute("DELETE FROM workspace WHERE id = ?", (&self.id,))
             .context("Failed to delete workspace")?;
@@ -311,6 +322,7 @@ impl Workspace {
     }
 }
 
+/// Generic key-value store table for app-level settings (e.g. the logged workspace name).
 #[derive(Debug, Clone)]
 pub struct Common {
     pub key: String,
@@ -318,6 +330,7 @@ pub struct Common {
 }
 
 impl Common {
+    /// Creates the `common` table if it does not already exist.
     pub fn create(conn: &Connection) -> Result<()> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS common (
@@ -331,6 +344,7 @@ impl Common {
         Ok(())
     }
 
+    /// Inserts a new key-value entry.
     pub fn insert(&self, conn: &Connection) -> Result<()> {
         conn.execute(
             "INSERT INTO common (key, value) VALUES (?1, ?2)",
@@ -341,6 +355,7 @@ impl Common {
         Ok(())
     }
 
+    /// Updates the value for an existing key.
     pub fn update(&self, conn: &Connection) -> Result<()> {
         conn.execute(
             "UPDATE common SET value = ? WHERE key = ?",
@@ -351,6 +366,7 @@ impl Common {
         Ok(())
     }
 
+    /// Fetches an entry by key. Returns `None` if the key doesn't exist.
     pub fn select(conn: &Connection, key: String) -> Result<Option<Self>> {
         let value = match conn.query_one(
             "SELECT value FROM common WHERE key = ?",
@@ -370,6 +386,7 @@ impl Common {
         Ok(value)
     }
 
+    /// Deletes an entry by key (no-op if the key doesn't exist).
     pub fn delete(conn: &Connection, key: String) -> Result<()> {
         conn.execute("DELETE FROM common WHERE key = ?", (key,))
             .context("Failed to delete common entry")?;

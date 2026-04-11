@@ -13,12 +13,15 @@ mod crypt;
 mod db;
 mod sync;
 
+/// Global application state shared across Tauri commands via a `Mutex`.
 #[derive(Debug)]
 pub struct AppState {
     database: Mutex<Connection>,
     workspace: Option<db::schema::Workspace>,
 }
 
+/// Bootstraps the Tauri app: initialises the database, spawns the sync service,
+/// registers all commands, and starts the event loop.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let log_level = env::var("NOTTO_LOG")

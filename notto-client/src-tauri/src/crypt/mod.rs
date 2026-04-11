@@ -14,6 +14,7 @@ use bip39::Language;
 use serde::{Deserialize, Serialize};
 use shared::LoginRequest;
 
+/// Decrypted note data passed between commands and the frontend.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct NoteData {
     pub id: String,
@@ -26,6 +27,7 @@ pub struct NoteData {
     pub deleted: bool,
 }
 
+/// Plaintext metadata stored encrypted alongside each note.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct NoteMetadata {
     pub title: String,
@@ -34,6 +36,7 @@ pub struct NoteMetadata {
     pub folder_open: bool,
 }
 
+/// Cryptographic material produced during account creation, sent to the server.
 #[derive(Debug)]
 pub struct AccountEncryptionData {
     pub recovery_key_auth: String,
@@ -51,6 +54,7 @@ pub struct AccountEncryptionData {
     pub stored_recovery_hash: String,
 }
 
+/// Cryptographic material generated when a workspace is created, stored locally.
 #[derive(Debug)]
 pub struct WorkspaceEncryptionData {
     pub master_encryption_key: Key<Aes256Gcm>,
@@ -60,6 +64,8 @@ pub struct WorkspaceEncryptionData {
     pub encrypted_mek_recovery: Vec<u8>,
 }
 
+/// Generates a fresh AES-256-GCM master encryption key (MEK) and encrypts it with a
+/// BIP-39 recovery key. Returns all material needed to bootstrap a new workspace.
 pub fn create_workspace() -> Result<WorkspaceEncryptionData> {
     let master_encryption_key: Key<Aes256Gcm> = Aes256Gcm::generate_key(OsRng).into();
 
@@ -96,6 +102,8 @@ pub fn create_workspace() -> Result<WorkspaceEncryptionData> {
     })
 }
 
+/// Derives all server-side hashes and encrypts the MEK with the user's password.
+/// Returns the data to be sent to the server during account registration.
 pub fn create_account(password: String, mek: Key<Aes256Gcm>) -> Result<AccountEncryptionData> {
     let recovery_key_auth = bip39::Mnemonic::generate_in(Language::English, 24)
         .context("Failed to generate recovery mnemonic")?
@@ -160,7 +168,8 @@ pub fn create_account(password: String, mek: Key<Aes256Gcm>) -> Result<AccountEn
     })
 }
 
-/// Returns login hash
+/// Derives the login hash from the password using the salts returned by the server.
+/// Returns a string to be sent as `login_hash` in `POST /login`.
 pub fn login(login_request: LoginRequest, password: String) -> Result<String> {
     let argon2 = Argon2::default();
 
@@ -180,6 +189,7 @@ pub fn login(login_request: LoginRequest, password: String) -> Result<String> {
         .map(|h| h.to_string())
 }
 
+/// Decrypts the master encryption key using the user's password and the server-provided salts.
 pub fn decrypt_mek(
     password: String,
     encrypted_mek_password: Vec<u8>,
@@ -214,6 +224,8 @@ pub fn decrypt_mek(
     Ok(mek.to_owned())
 }
 
+/// Encrypts `data` with AES-256-GCM using a fresh random nonce.
+/// Returns `(ciphertext, nonce)`.
 pub fn encrypt_data(data: &[u8], key: &Key<Aes256Gcm>) -> Result<(Vec<u8>, Vec<u8>)> {
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
     let cipher = Aes256Gcm::new(key);
@@ -223,6 +235,7 @@ pub fn encrypt_data(data: &[u8], key: &Key<Aes256Gcm>) -> Result<(Vec<u8>, Vec<u
     Ok((ciphertext, nonce.to_vec()))
 }
 
+/// Decrypts AES-256-GCM `ciphertext` with the given `nonce` and `key`.
 pub fn decrypt_data(ciphertext: &[u8], nonce: &[u8], key: &Key<Aes256Gcm>) -> Result<Vec<u8>> {
     let nonce = Nonce::from_slice(nonce);
     let cipher = Aes256Gcm::new(key);

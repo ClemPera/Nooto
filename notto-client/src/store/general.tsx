@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { Note, Workspace } from "../types";
 
+/** Mirrors the `SyncStatus` enum emitted by the Tauri sync service. */
 export enum syncStatusEnum {
   Synched = "Synched",
   Syncing = "Syncing",
@@ -21,6 +22,7 @@ type Store = {
   setSyncStatus: (status: syncStatusEnum) => void;
 };
 
+/** Global store for workspace, note list, and sync status. */
 export const useGeneral = create<Store>((set) => ({
   workspace: null,
   allWorkspaces: [],

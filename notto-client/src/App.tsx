@@ -10,6 +10,7 @@ import ConflictModal from "./components/modals/ConflictModal";
 import Toaster from "./components/Toaster";
 import { handleCommandError } from "./lib/errors";
 
+/** Root component — bootstraps the workspace on mount and renders the modal/toast layer. */
 function App() {
   const { setWorkspace, setAllWorkspaces } = useGeneral();
   const hasInitialized = useRef(false);
@@ -20,6 +21,7 @@ function App() {
     init();
   }, []);
 
+  /** Loads the last active workspace on startup, creating a default one if none exist. */
   async function init() {
     await invoke("init").catch(handleCommandError);
 

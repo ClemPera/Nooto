@@ -6,6 +6,8 @@ use crate::{crypt, db::schema::Workspace};
 pub mod operations;
 pub mod service;
 
+/// Assembles the `shared::User` payload from workspace and account encryption data,
+/// then posts it to the server's `/create_account` endpoint.
 pub async fn create_account(
     workspace: Workspace,
     username: String,
@@ -35,6 +37,8 @@ pub async fn create_account(
     operations::create_account(send_user, instance).await
 }
 
+/// Fetches the server salts, derives the login hash locally, and submits credentials.
+/// Returns the server's `Login` response on success.
 pub async fn login(username: String, password: String, instance: String) -> Result<shared::Login> {
     trace!("requesting login...");
 

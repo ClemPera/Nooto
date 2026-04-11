@@ -13,6 +13,7 @@ use crate::{
     sync,
 };
 
+/// Sync state emitted to the frontend via the `sync-status` Tauri event.
 #[derive(Clone, Serialize)]
 pub enum SyncStatus {
     Synched,
@@ -22,6 +23,8 @@ pub enum SyncStatus {
     NotConnected,
 }
 
+/// Background sync loop: every second, pulls new notes from the server then pushes unsynced ones.
+/// Emits `sync-status` and `new_note_metadata` events to the frontend as state changes.
 pub async fn run(handle: AppHandle) {
     let state = handle.state::<Mutex<AppState>>();
 
@@ -98,6 +101,8 @@ fn emit<S: Serialize + Clone>(handle: &AppHandle, event: &str, payload: S) {
     }
 }
 
+/// Fetches notes updated after `last_seen` from the server, stores them locally,
+/// and emits `new_note_metadata`. Returns the highest `updated_at` among received notes.
 pub async fn receive_latest_notes(
     state: &Mutex<AppState>,
     workspace: Workspace,
@@ -158,6 +163,9 @@ pub async fn receive_latest_notes(
     Ok(max_updated_at)
 }
 
+/// Collects all unsynced local notes and pushes them to the server.
+/// Marks successfully uploaded notes as synced; emits `conflict` for any conflicting ones.
+/// Returns the highest `updated_at` among sent notes.
 pub async fn send_latest_notes(
     state: &Mutex<AppState>,
     workspace: Workspace,
@@ -220,6 +228,7 @@ pub async fn send_latest_notes(
     Ok(max_updated_at)
 }
 
+/// Advances `last_sync_at` to `timestamp + 1` in both the in-memory state and the database.
 pub async fn update_last_sync(
     state: &Mutex<AppState>,
     mut updated_workspace: Workspace,

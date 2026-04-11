@@ -8,6 +8,8 @@ use tokio::sync::Mutex;
 pub mod operations;
 pub mod schema;
 
+/// Opens (or creates) the SQLite database at `db_path`, enables foreign keys, and
+/// runs all table creation migrations. Returns a `Mutex`-wrapped connection.
 pub fn init(db_path: PathBuf) -> Result<Mutex<Connection>> {
     debug!("creating/opening database at {db_path:?}");
     let conn = Connection::open(&db_path)
