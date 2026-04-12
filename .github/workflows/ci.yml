@@ -20,7 +20,7 @@ jobs:
           workspaces: ". -> target"
 
       - name: Run server tests
-        run: cargo test -p server
+        run: cargo test -p nooto-server
 
   test-rust-client:
     name: Rust Client Tests
@@ -62,12 +62,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: nooto-client/package-lock.json
+          cache-dependency-path: client/package-lock.json
 
       - name: Install dependencies
-        working-directory: nooto-client
+        working-directory: client
         run: npm ci
 
       - name: Run Vitest
-        working-directory: nooto-client
+        working-directory: client
         run: npm test
