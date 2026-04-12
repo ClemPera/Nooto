@@ -13,7 +13,7 @@ git checkout -b claude-dev  # Create and switch to claude-dev branch
 
 ## Project Overview
 
-Notto is an end-to-end encrypted note-taking application built with:
+Nooto is an end-to-end encrypted note-taking application built with:
 - **Client**: Tauri v2 desktop app (Rust backend + React frontend with TypeScript)
 - **Server**: Axum HTTP server for sync
 - **Database**: MariaDB (server), SQLite (client)
@@ -23,7 +23,7 @@ Notto is an end-to-end encrypted note-taking application built with:
 
 ### Frontend (Tauri Client)
 ```bash
-cd notto-client
+cd nooto-client
 npm install                    # Install dependencies
 npm run tauri dev              # Run development mode
 npm run build                  # Build TypeScript
@@ -32,7 +32,7 @@ npm run tauri build            # Build production app
 
 ### Backend (Sync Server)
 ```bash
-cd notto-server
+cd server
 cargo run                      # Run development server (listens on 0.0.0.0:3000)
 cargo build --release          # Build production binary
 ```
@@ -44,7 +44,7 @@ docker-compose up              # Start MariaDB and Adminer (port 8080)
 docker-compose down            # Stop services
 ```
 
-Database connection string must be set in `notto-server/.env` as `DATABASE_URL`.
+Database connection string must be set in `server/.env` as `DATABASE_URL`.
 
 ### Workspace Commands
 From project root:
@@ -58,8 +58,8 @@ cargo test                     # Run tests for all crates
 ### Workspace Structure
 This is a Cargo workspace with three members:
 - `shared/`: Common types and structs shared between client and server
-- `notto-client/src-tauri/`: Tauri backend (Rust)
-- `notto-server/`: HTTP sync server (Axum)
+- `client/src-tauri/`: Tauri backend (Rust)
+- `server/`: HTTP sync server (Axum)
 
 ### Client Architecture (Tauri)
 

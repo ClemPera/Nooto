@@ -1,0 +1,16 @@
+[package]
+name = "nooto-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+shared = { path = "../shared" }
+axum = { version="0.8", features = ["macros"] }
+chrono = { version="0.4", features = ["serde"] }
+dotenv = "0.15"   
+mysql_async = { version="0.36", features = ["chrono"] }
+rand_core = "0.9"
+serde = { version = "1", features = ["derive"] }
+tokio = { version="1.48", features = ["rt-multi-thread"]}
+hex = "0.4"
+anyhow = "1.0"
