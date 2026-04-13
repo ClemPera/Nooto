@@ -17,9 +17,7 @@ use crate::schema::User;
 
 mod schema;
 
-mod embedded {
-    refinery::embed_migrations!("migrations");
-}
+mod migrations;
 
 /// Application error returned by all handlers.
 /// Internal errors are logged server-side and return a generic 500 to the client.
@@ -100,8 +98,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to get DB connection for migrations")?;
 
-    embedded::migrations::runner()
-        .run_async(&mut conn)
+    migrations::run(&mut conn)
         .await
         .context("Failed to run database migrations")?;
 

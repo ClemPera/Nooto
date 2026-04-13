@@ -14,4 +14,3 @@ serde = { version = "1", features = ["derive"] }
 tokio = { version="1.48", features = ["rt-multi-thread"]}
 hex = "0.4"
 anyhow = "1.0"
-refinery = { version = "0.8", features = ["mysql_async"] }
