@@ -158,42 +158,4 @@ jobs:
           projectPath: notto-client
           args: '--target android'
 
-  build-ios:
-    name: Build iOS
-    runs-on: macos-latest
-    # Requires iOS project files — run 'tauri ios init' locally and commit
-    # the generated notto-client/src-tauri/gen/ios/ directory first.
-    # Distributing a signed IPA also requires signing certificates configured
-    # as repository secrets (APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD,
-    # APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_TEAM_ID).
 
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: 'aarch64-apple-ios,x86_64-apple-ios,aarch64-apple-ios-sim'
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: '. -> target'
-
-      - name: Install frontend dependencies
-        working-directory: notto-client
-        run: npm install
-
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Notto ${{ github.ref_name }}'
-          releaseBody: 'See the assets below to download and install this version.'
-          releaseDraft: true
-          prerelease: false
-          projectPath: notto-client
-          args: '--target ios'
