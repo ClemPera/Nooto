@@ -2,7 +2,7 @@ services:
   db:
     image: mariadb:lts
     volumes:
-      - db_data:/var/lib/mysql
+      - ./db_data:/var/lib/mysql
     environment:
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
       MARIADB_DATABASE: ${MARIADB_DATABASE}
@@ -27,6 +27,3 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
-
-volumes:
-  db_data:
