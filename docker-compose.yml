@@ -1,0 +1,29 @@
+services:
+  db:
+    image: mariadb:lts
+    volumes:
+      - ./db_data:/var/lib/mysql
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      MARIADB_USER: ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      dockerfile: notto-server/Dockerfile
+    ports:
+      - "${SERVER_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: mysql://${MARIADB_USER}:${MARIADB_PASSWORD}@db:3306/${MARIADB_DATABASE}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped

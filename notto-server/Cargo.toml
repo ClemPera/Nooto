@@ -3,6 +3,19 @@ name = "notto-server"
 version = "0.1.0"
 edition = "2024"
 
+[package.metadata.deb]
+maintainer = "Clément Pera"
+section = "net"
+priority = "optional"
+assets = [
+    { source = "target/release/notto-server", dest = "/usr/bin/notto-server", mode = "755" },
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/notto-server", dest = "/usr/bin/notto-server", mode = "0755" },
+]
+
 [dependencies]
 shared = { path = "../shared" }
 axum = { version="0.8", features = ["macros"] }

@@ -1,0 +1,60 @@
+name: Release Server
+
+on:
+  push:
+    tags:
+      - 'server-v*'
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Build Linux Server (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Build release binary
+        run: cargo build --release -p notto-server
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build .deb package
+        run: cargo deb -p notto-server --no-build
+
+      - name: Install cargo-generate-rpm
+        run: cargo install cargo-generate-rpm
+
+      - name: Build .rpm package
+        run: cargo generate-rpm -p notto-server
+
+      - name: Create tarball
+        run: |
+          tar -czf notto-server-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz \
+            -C target/release notto-server
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            target/debian/*.deb
+            target/generate-rpm/*.rpm
+            notto-server-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
