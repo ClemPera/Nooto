@@ -435,7 +435,7 @@ pub async fn sync_login(
 
         notes
             .into_iter()
-            .map(|n| db::operations::get_note(&conn, n.uuid, mek))
+            .map(|n| db::operations::get_note(&conn, n.uuid, workspace.master_encryption_key))
             .collect::<anyhow::Result<Vec<_>>>()?
     };
 
