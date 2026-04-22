@@ -95,7 +95,10 @@ export default function AccountMenu() {
   }
 
   async function addWorkspace() {
-    const name = "workspace " + (allWorkspaces.length + 1);
+    const existingNames = new Set(allWorkspaces.map((ws) => ws.workspace_name));
+    let counter = 1;
+    while (existingNames.has(`workspace ${counter}`)) counter++;
+    const name = `workspace ${counter}`;
     await invoke("create_workspace", { workspace_name: name }).catch(handleCommandError);
     await invoke("set_logged_workspace", { workspace_name: name }).catch(handleCommandError);
     const ws = await invoke("get_logged_workspace")
