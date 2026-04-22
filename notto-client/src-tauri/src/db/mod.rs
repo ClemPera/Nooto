@@ -24,11 +24,5 @@ pub fn init(db_path: PathBuf) -> Result<Mutex<Connection>> {
     schema::Common::create(&conn)?;
     trace!("Tables have been created correctly");
 
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_name ON workspace(workspace_name)",
-        [],
-    )
-    .context("Failed to create unique index on workspace name")?;
-
     Ok(Mutex::new(conn))
 }
