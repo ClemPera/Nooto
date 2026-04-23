@@ -5,7 +5,7 @@ use aes_gcm::{
 use anyhow::{Context, Result};
 use argon2::{
     password_hash::{
-        rand_core::{OsRng, RngCore},
+        rand_core::OsRng,
         PasswordHasher, SaltString,
     },
     Argon2,
@@ -249,7 +249,7 @@ pub fn decrypt_data(ciphertext: &[u8], nonce: &[u8], key: &Key<Aes256Gcm>) -> Re
 mod tests {
     use super::*;
     use aes_gcm::{Aes256Gcm, KeyInit};
-    use argon2::password_hash::rand_core::{OsRng, RngCore};
+    use argon2::password_hash::rand_core::{OsRng};
 
     fn random_key() -> Key<Aes256Gcm> {
         Aes256Gcm::generate_key(OsRng)

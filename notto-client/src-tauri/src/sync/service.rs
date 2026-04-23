@@ -4,7 +4,7 @@ use shared::{SelectNotesParams, SentNotes};
 use tokio::{sync::Mutex, time::Duration};
 
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_log::log::{debug, error, info, trace, warn};
+use tauri_plugin_log::log::{debug, error, info};
 
 use crate::{
     AppState, commands,

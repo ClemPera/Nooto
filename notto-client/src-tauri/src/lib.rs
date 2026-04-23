@@ -4,9 +4,8 @@ use tokio::sync::Mutex;
 
 use rusqlite::Connection;
 use tauri::Manager;
-use tauri_plugin_log::log::{LevelFilter, debug};
+use tauri_plugin_log::log::LevelFilter;
 
-use crate::db::schema;
 
 mod commands;
 mod crypt;
