@@ -10,7 +10,7 @@ use axum::{
 };
 use dotenv::dotenv;
 use mysql_async::{Conn, Pool};
-use rand_core::{OsRng, TryRngCore};
+use rand::{TryRng, rngs::SysRng};
 use shared::SentNotesResult;
 
 use crate::schema::User;
@@ -352,7 +352,7 @@ async fn login(
     }
 
     let mut token = vec![0u8; 32];
-    OsRng
+    SysRng
         .try_fill_bytes(&mut token)
         .map_err(|e| AppError::internal(anyhow::anyhow!("Failed to generate token: {e}")))?;
 
