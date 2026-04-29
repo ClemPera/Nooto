@@ -139,6 +139,7 @@ jobs:
             ln -sf $NDK_BIN/llvm-ranlib $NDK_BIN/$TRIPLE-ranlib
             ln -sf $NDK_BIN/llvm-ar     $NDK_BIN/$TRIPLE-ar
           done
+          echo "$NDK_BIN" >> $GITHUB_PATH
 
       - uses: dtolnay/rust-toolchain@stable
         with:
