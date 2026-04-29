@@ -18,7 +18,7 @@ export default function AuthForm({ mode, loading, error, onSubmit, onToggleMode 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [instance, setInstance] = useState("http://localhost:3000");
+  const [instance, setInstance] = useState("https://nooto.nextmiracle.eu");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [localError, setLocalError] = useState("");
 
@@ -118,7 +118,7 @@ export default function AuthForm({ mode, loading, error, onSubmit, onToggleMode 
                 value={instance}
                 onChange={(e) => setInstance(e.target.value)}
                 className={INPUT_CLASS}
-                placeholder="http://localhost:3000"
+                placeholder="https://nooto.nextmiracle.eu"
                 disabled={loading}
               />
             </div>
