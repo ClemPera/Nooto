@@ -130,7 +130,15 @@ jobs:
       - uses: android-actions/setup-android@v3
 
       - name: Install Android NDK
-        run: sdkmanager "ndk;25.2.9519653"
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: Setup NDK toolchain wrappers
+        run: |
+          NDK_BIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+          for TRIPLE in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android; do
+            ln -sf $NDK_BIN/llvm-ranlib $NDK_BIN/$TRIPLE-ranlib
+            ln -sf $NDK_BIN/llvm-ar     $NDK_BIN/$TRIPLE-ar
+          done
 
       - uses: dtolnay/rust-toolchain@stable
         with:
