@@ -12,12 +12,12 @@ RUN apt-get update && apt-get install -y \
 # client so its heavy system dependencies are never pulled in.
 COPY Cargo.lock ./
 COPY shared/ ./shared/
-COPY notto-server/ ./notto-server/
+COPY nooto-server/ ./nooto-server/
 
 # Minimal workspace that covers only server-side crates
-RUN printf '[workspace]\nresolver = "3"\nmembers = ["shared", "notto-server"]\n' > Cargo.toml
+RUN printf '[workspace]\nresolver = "3"\nmembers = ["shared", "nooto-server"]\n' > Cargo.toml
 
-RUN cargo build --release -p notto-server
+RUN cargo build --release -p nooto-server
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -27,8 +27,8 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/notto-server /usr/local/bin/notto-server
+COPY --from=builder /app/target/release/nooto-server /usr/local/bin/nooto-server
 
 EXPOSE 3000
 
-CMD ["notto-server"]
+CMD ["nooto-server"]

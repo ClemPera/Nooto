@@ -5,7 +5,7 @@ edition = "2024"
 description = "A cross-platform, privacy-focused note-taking application with end-to-end encryption and self-hostable sync capabilities. The application prioritizes local-first architecture with optional cloud synchronization, enabling users to maintain full control over their data. " 
 authors = ["Clément Pera"]
 readme = "../README.md"
-repository = "https://github.com/ClemPera/Notto"
+repository = "https://github.com/ClemPera/Nooto"
 license-file = "../LICENSE"
 
 [package.metadata.deb]
@@ -13,12 +13,12 @@ maintainer = "Clément Pera"
 section = "net"
 priority = "optional"
 assets = [
-    { source = "target/release/notto-server", dest = "/usr/bin/notto-server", mode = "755" },
+    { source = "target/release/nooto-server", dest = "/usr/bin/nooto-server", mode = "755" },
 ]
 
 [package.metadata.generate-rpm]
 assets = [
-    { source = "target/release/notto-server", dest = "/usr/bin/notto-server", mode = "0755" },
+    { source = "target/release/nooto-server", dest = "/usr/bin/nooto-server", mode = "0755" },
 ]
 
 [dependencies]

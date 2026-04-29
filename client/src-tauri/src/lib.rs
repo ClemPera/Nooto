@@ -23,7 +23,7 @@ pub struct AppState {
 /// registers all commands, and starts the event loop.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let log_level = env::var("NOTTO_LOG")
+    let log_level = env::var("NOOTO_LOG")
         .ok()
         .and_then(|s| s.parse::<LevelFilter>().ok())
         .unwrap_or(LevelFilter::Info);
