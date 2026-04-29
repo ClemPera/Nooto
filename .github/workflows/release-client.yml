@@ -74,7 +74,7 @@ jobs:
             file
 
       - name: Install frontend dependencies
-        working-directory: nooto-client
+        working-directory: client
         run: npm install
 
       - uses: tauri-apps/tauri-action@v0
@@ -86,7 +86,7 @@ jobs:
           releaseBody: 'See the assets below to download and install this version.'
           releaseDraft: true
           prerelease: false
-          projectPath: nooto-client
+          projectPath: client
           args: ${{ matrix.tauri-args }}
 
       - name: Create binary archive
@@ -142,7 +142,7 @@ jobs:
           workspaces: '. -> target'
 
       - name: Install frontend dependencies
-        working-directory: nooto-client
+        working-directory: client
         run: npm install
 
       - uses: tauri-apps/tauri-action@v0
@@ -155,7 +155,7 @@ jobs:
           releaseBody: 'See the assets below to download and install this version.'
           releaseDraft: true
           prerelease: false
-          projectPath: nooto-client
+          projectPath: client
           args: '--target android'
 
 
