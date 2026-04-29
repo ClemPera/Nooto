@@ -74,7 +74,8 @@ jobs:
             build-essential \
             curl \
             wget \
-            file
+            file \
+            xdg-utils
 
       - name: Install frontend dependencies
         working-directory: client
