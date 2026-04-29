@@ -8,14 +8,11 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy only what cargo needs to resolve the workspace, excluding the Tauri
-# client so its heavy system dependencies are never pulled in.
-COPY Cargo.lock ./
 COPY shared/ ./shared/
-COPY nooto-server/ ./nooto-server/
+COPY server/ ./server/
 
 # Minimal workspace that covers only server-side crates
-RUN printf '[workspace]\nresolver = "3"\nmembers = ["shared", "nooto-server"]\n' > Cargo.toml
+RUN printf '[workspace]\nresolver = "3"\nmembers = ["shared", "server"]\n' > Cargo.toml
 
 RUN cargo build --release -p nooto-server
 
@@ -27,7 +24,7 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/nooto-server /usr/local/bin/nooto-server
+COPY --from=builder /app/target/release/notto-server /usr/local/bin/nooto-server
 
 EXPOSE 3000
 
