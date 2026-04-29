@@ -158,10 +158,18 @@ jobs:
         working-directory: client
         run: npm install
 
+      - name: Setup Android keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > ${{ runner.temp }}/nooto.keystore
+
       - name: Build Android APK
         working-directory: client
         env:
           NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/nooto.keystore
+          ANDROID_KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: npm run tauri android build -- --apk
 
       - name: Find APK artifacts
