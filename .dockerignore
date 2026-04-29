@@ -1,0 +1,17 @@
+# Keep the Docker build context small — the Dockerfile only needs
+# the server and shared crates.
+
+.git
+.github
+
+notto-client
+
+target
+
+mariadb
+
+**/.env
+**/*.env
+
+**/*.md
+LICENSE

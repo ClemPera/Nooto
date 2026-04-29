@@ -4,7 +4,7 @@ use shared::{SelectNotesParams, SentNotes};
 use tokio::{sync::Mutex, time::Duration};
 
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_log::log::{debug, error, info, trace, warn};
+use tauri_plugin_log::log::{debug, error, info};
 
 use crate::{
     AppState, commands,
@@ -18,7 +18,7 @@ use crate::{
 pub enum SyncStatus {
     Synched,
     Syncing,
-    Error(String),
+    Error,
     Offline,
     NotConnected,
 }
@@ -44,7 +44,7 @@ pub async fn run(handle: AppHandle) {
                             if let Some(ts) = max_ts {
                                 if let Err(e) = update_last_sync(&state, workspace.clone(), ts).await {
                                     error!("{e:#}");
-                                    emit(&handle, "sync-status", SyncStatus::Error(format!("{e:#}").to_string()));
+                                    emit(&handle, "sync-status", SyncStatus::Error);
                                     break 'sync;
                                 }
                             }
@@ -54,7 +54,7 @@ pub async fn run(handle: AppHandle) {
                                 emit(&handle, "sync-status", SyncStatus::Offline);
                                 info!("Couldn't connect to server");
                             } else {
-                                emit(&handle, "sync-status", SyncStatus::Error(format!("{e:#}").to_string()));
+                                emit(&handle, "sync-status", SyncStatus::Error);
                                 error!("{e:#}");
                             }
                             break 'sync;
@@ -66,7 +66,7 @@ pub async fn run(handle: AppHandle) {
                             if let Some(ts) = max_ts {
                                 if let Err(e) = update_last_sync(&state, workspace.clone(), ts).await {
                                     error!("{e:#}");
-                                    emit(&handle, "sync-status", SyncStatus::Error(format!("{e:#}").to_string()));
+                                    emit(&handle, "sync-status", SyncStatus::Error);
                                     break 'sync;
                                 }
                             }
@@ -76,7 +76,7 @@ pub async fn run(handle: AppHandle) {
                                 emit(&handle, "sync-status", SyncStatus::Offline);
                                 info!("Couldn't connect to server");
                             } else {
-                                emit(&handle, "sync-status", SyncStatus::Error(format!("{e:#}").to_string()));
+                                emit(&handle, "sync-status", SyncStatus::Error);
                                 error!("{e:#}");
                             }
                             break 'sync;

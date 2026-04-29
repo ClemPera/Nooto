@@ -182,7 +182,7 @@ impl Workspace {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS workspace (
                 id INTEGER PRIMARY KEY,
-                workspace_name TEXT,
+                workspace_name TEXT UNIQUE,
                 username TEXT,
                 master_encryption_key BLOB,
                 salt_recovery_data TEXT,

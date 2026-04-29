@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use shared::{LoginRequestParams, Note, SelectNoteParams, SelectNotesParams, SentNotes, User};
-use tauri_plugin_log::log::{debug, trace};
 
 /// `POST /notes` — uploads a batch of notes and returns per-note results (Ok or Conflict).
 pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared::SentNotesResult>> {

@@ -122,6 +122,13 @@ pub fn update_note(conn: &Connection, note_data: NoteData, mek: Key<Aes256Gcm>) 
 
 /// Generates encryption keys for a new workspace, inserts it, and returns the full record.
 pub fn create_workspace(conn: &Connection, workspace_name: String) -> Result<Workspace> {
+    if Workspace::select(conn, workspace_name.clone())
+        .context("Failed to check for existing workspace")?
+        .is_some()
+    {
+        anyhow::bail!("A workspace named \"{}\" already exists", workspace_name);
+    }
+
     let workspace_encryption_data =
         crypt::create_workspace().context("Failed to generate workspace encryption data")?;
 

@@ -1,0 +1,161 @@
+name: Release Client
+
+on:
+  push:
+    tags:
+      - 'client-v*'
+  workflow_dispatch:
+
+jobs:
+  build-desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            os: linux
+            arch: x86_64
+            rust-targets: ''
+            tauri-args: ''
+            binary: notto
+
+          - runner: ubuntu-24.04-arm
+            os: linux
+            arch: aarch64
+            rust-targets: ''
+            tauri-args: ''
+            binary: notto
+
+          - runner: macos-latest
+            os: macos
+            arch: universal
+            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+            tauri-args: '--target universal-apple-darwin'
+            binary: notto
+
+          - runner: windows-latest
+            os: windows
+            arch: x86_64
+            rust-targets: ''
+            tauri-args: ''
+            binary: notto.exe
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Install Linux system dependencies
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential \
+            curl \
+            wget \
+            file
+
+      - name: Install frontend dependencies
+        working-directory: notto-client
+        run: npm install
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Notto ${{ github.ref_name }}'
+          releaseBody: 'See the assets below to download and install this version.'
+          releaseDraft: true
+          prerelease: false
+          projectPath: notto-client
+          args: ${{ matrix.tauri-args }}
+
+      - name: Create binary archive
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            BIN_PATH="target/universal-apple-darwin/release/${{ matrix.binary }}"
+          else
+            BIN_PATH="target/release/${{ matrix.binary }}"
+          fi
+          ARCHIVE="notto-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz"
+          tar -czf "$ARCHIVE" -C "$(dirname "$BIN_PATH")" "$(basename "$BIN_PATH")"
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: ${{ env.ARCHIVE }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android,
+            i686-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+
+      - name: Install frontend dependencies
+        working-directory: notto-client
+        run: npm install
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Notto ${{ github.ref_name }}'
+          releaseBody: 'See the assets below to download and install this version.'
+          releaseDraft: true
+          prerelease: false
+          projectPath: notto-client
+          args: '--target android'
+
+

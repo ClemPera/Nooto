@@ -1,10 +1,12 @@
 [package]
 name = "nooto"
-version = "0.0.15"
-description = "A Tauri App" 
+version = "0.0.17"
+edition = "2024"
+description = "A cross-platform, privacy-focused note-taking application with end-to-end encryption and self-hostable sync capabilities. The application prioritizes local-first architecture with optional cloud synchronization, enabling users to maintain full control over their data. " 
 authors = ["Clément Pera"]
-edition = "2021"
-# TODO: complete
+readme = "../README.md"
+repository = "https://github.com/ClemPera/Notto"
+license-file = "../LICENSE"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -24,17 +26,17 @@ tauri = { version = "2.9", features = [] }
 tauri-plugin-opener = "2.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rusqlite = { version="0.37", features = ["chrono", "bundled"] }
+rusqlite = { version="0.39", features = ["chrono", "bundled"] }
 tauri-plugin-log = "2.7"
 argon2 = { version = "0.5", features = ["std"] }
 aes-gcm = "0.10"
 chrono = { version="0.4", features = ["serde"] }
 bip39 = { version="2.2", features = ["rand"] }
-reqwest = { version = "0.12", features = ["json", "blocking", "native-tls-vendored"] }
+reqwest = { version = "0.13", features = ["json", "blocking", "native-tls-vendored", "query"] }
 anyhow = "1.0"
 tokio = "1.48"
 hex = "0.4"
 uuid = { version = "1.19", features = ["v7"] }
 
-[lints.rust]
-unused_imports = "allow" #TODO: remove
+# [lints.rust]
+# unused_imports = "allow"

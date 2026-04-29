@@ -10,12 +10,14 @@ use axum::{
 };
 use dotenv::dotenv;
 use mysql_async::{Conn, Pool};
-use rand_core::{OsRng, TryRngCore};
+use rand::{TryRng, rngs::SysRng};
 use shared::SentNotesResult;
 
 use crate::schema::User;
 
 mod schema;
+
+mod migrations;
 
 /// Application error returned by all handlers.
 /// Internal errors are logged server-side and return a generic 500 to the client.
@@ -82,7 +84,7 @@ impl From<anyhow::Error> for AppError {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     //Env var should be like mysql://user:pass%20word@localhost/database_name
     let pool = Pool::new(
@@ -90,6 +92,17 @@ async fn main() {
             .expect("DATABASE_URL must be set")
             .as_str(),
     );
+
+    let mut conn = pool
+        .get_conn()
+        .await
+        .context("Failed to get DB connection for migrations")?;
+
+    migrations::run(&mut conn)
+        .await
+        .context("Failed to run database migrations")?;
+
+    drop(conn);
 
     let app = Router::new()
         .route("/notes", post(send_notes))
@@ -112,6 +125,8 @@ async fn main() {
     axum::serve(listener, app)
         .await
         .expect("Server error");
+
+    Ok(())
 }
 
 /// Verifies that `token` matches one of the stored tokens for `username`.
@@ -337,7 +352,7 @@ async fn login(
     }
 
     let mut token = vec![0u8; 32];
-    OsRng
+    SysRng
         .try_fill_bytes(&mut token)
         .map_err(|e| AppError::internal(anyhow::anyhow!("Failed to generate token: {e}")))?;
 
