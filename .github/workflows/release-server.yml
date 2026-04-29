@@ -6,6 +6,9 @@ on:
       - 'server-v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-linux:
     name: Build Linux Server (${{ matrix.arch }})
