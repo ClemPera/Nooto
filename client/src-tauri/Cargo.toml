@@ -1,0 +1,42 @@
+[package]
+name = "nooto"
+version = "0.0.17"
+edition = "2024"
+description = "A cross-platform, privacy-focused note-taking application with end-to-end encryption and self-hostable sync capabilities. The application prioritizes local-first architecture with optional cloud synchronization, enabling users to maintain full control over their data. " 
+authors = ["Clément Pera"]
+readme = "../README.md"
+repository = "https://github.com/ClemPera/Nooto"
+license-file = "../LICENSE"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "nooto_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+shared = { path = "../../shared" }
+tauri = { version = "2.9", features = [] }
+tauri-plugin-opener = "2.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = { version="0.39", features = ["chrono", "bundled"] }
+tauri-plugin-log = "2.7"
+argon2 = { version = "0.5", features = ["std"] }
+aes-gcm = "0.10"
+chrono = { version="0.4", features = ["serde"] }
+bip39 = { version="2.2", features = ["rand"] }
+reqwest = { version = "0.13", features = ["json", "blocking", "native-tls-vendored", "query"] }
+anyhow = "1.0"
+tokio = "1.48"
+hex = "0.4"
+uuid = { version = "1.19", features = ["v7"] }
+
+# [lints.rust]
+# unused_imports = "allow"

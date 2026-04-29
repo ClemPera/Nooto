@@ -1,4 +1,4 @@
-# Notto
+# Nooto
 
 See [Technical infos](./technical_infos.md) file for more informations on what I'm building.
 

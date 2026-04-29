@@ -17,28 +17,28 @@ jobs:
             arch: x86_64
             rust-targets: ''
             tauri-args: ''
-            binary: notto
+            binary: nooto
 
           - runner: ubuntu-24.04-arm
             os: linux
             arch: aarch64
             rust-targets: ''
             tauri-args: ''
-            binary: notto
+            binary: nooto
 
           - runner: macos-latest
             os: macos
             arch: universal
             rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
             tauri-args: '--target universal-apple-darwin'
-            binary: notto
+            binary: nooto
 
           - runner: windows-latest
             os: windows
             arch: x86_64
             rust-targets: ''
             tauri-args: ''
-            binary: notto.exe
+            binary: nooto.exe
 
     runs-on: ${{ matrix.runner }}
 
@@ -74,7 +74,7 @@ jobs:
             file
 
       - name: Install frontend dependencies
-        working-directory: notto-client
+        working-directory: nooto-client
         run: npm install
 
       - uses: tauri-apps/tauri-action@v0
@@ -82,11 +82,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Notto ${{ github.ref_name }}'
+          releaseName: 'Nooto ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download and install this version.'
           releaseDraft: true
           prerelease: false
-          projectPath: notto-client
+          projectPath: nooto-client
           args: ${{ matrix.tauri-args }}
 
       - name: Create binary archive
@@ -97,7 +97,7 @@ jobs:
           else
             BIN_PATH="target/release/${{ matrix.binary }}"
           fi
-          ARCHIVE="notto-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz"
+          ARCHIVE="nooto-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz"
           tar -czf "$ARCHIVE" -C "$(dirname "$BIN_PATH")" "$(basename "$BIN_PATH")"
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
@@ -142,7 +142,7 @@ jobs:
           workspaces: '. -> target'
 
       - name: Install frontend dependencies
-        working-directory: notto-client
+        working-directory: nooto-client
         run: npm install
 
       - uses: tauri-apps/tauri-action@v0
@@ -151,11 +151,11 @@ jobs:
           NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Notto ${{ github.ref_name }}'
+          releaseName: 'Nooto ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download and install this version.'
           releaseDraft: true
           prerelease: false
-          projectPath: notto-client
+          projectPath: nooto-client
           args: '--target android'
 
 

@@ -30,24 +30,24 @@ jobs:
           workspaces: '. -> target'
 
       - name: Build release binary
-        run: cargo build --release -p notto-server
+        run: cargo build --release -p nooto-server
 
       - name: Install cargo-deb
         run: cargo install cargo-deb
 
       - name: Build .deb package
-        run: cargo deb -p notto-server --no-build
+        run: cargo deb -p nooto-server --no-build
 
       - name: Install cargo-generate-rpm
         run: cargo install cargo-generate-rpm
 
       - name: Build .rpm package
-        run: cargo generate-rpm -p notto-server
+        run: cargo generate-rpm -p nooto-server
 
       - name: Create tarball
         run: |
-          tar -czf notto-server-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz \
-            -C target/release notto-server
+          tar -czf nooto-server-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz \
+            -C target/release nooto-server
 
       - uses: softprops/action-gh-release@v2
         with:
@@ -55,6 +55,6 @@ jobs:
           files: |
             target/debian/*.deb
             target/generate-rpm/*.rpm
-            notto-server-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz
+            nooto-server-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
