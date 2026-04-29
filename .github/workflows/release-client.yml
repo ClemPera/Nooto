@@ -145,17 +145,26 @@ jobs:
         working-directory: client
         run: npm install
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build Android APK
+        working-directory: client
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+        run: npm run tauri android build -- --apk
+
+      - name: Find APK artifacts
+        run: |
+          find client/src-tauri/gen/android -name "*.apk" | tee apk-paths.txt
+          echo "APK_FILES=$(cat apk-paths.txt | tr '\n' ',' | sed 's/,$//')" >> "$GITHUB_ENV"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 'Nooto ${{ github.ref_name }}'
+          body: 'See the assets below to download and install this version.'
+          draft: true
+          prerelease: false
+          files: ${{ env.APK_FILES }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Nooto ${{ github.ref_name }}'
-          releaseBody: 'See the assets below to download and install this version.'
-          releaseDraft: true
-          prerelease: false
-          projectPath: client
-          args: '--target android'
 
 
