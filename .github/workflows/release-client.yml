@@ -59,6 +59,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: '. -> target'
+          prefix-key: client
 
       - name: Install Linux system dependencies
         if: matrix.os == 'linux'
@@ -153,6 +154,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: '. -> target'
+          prefix-key: client
 
       - name: Install frontend dependencies
         working-directory: client
