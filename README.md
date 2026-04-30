@@ -13,8 +13,8 @@
 
 ---
 
-> **Beta software** -- Nooto is functional but still in active development. Expect rough edges.
-> **Security notice** -- The encryption design has not been audited by an independent security expert. Use at your own discretion.
+> **Beta software**: Nooto is functional but still in active development. Expect rough edges.  
+> **Security notice**: The encryption design has not been audited by an independent security expert. Use at your own discretion.
 
 ---
 
@@ -168,7 +168,7 @@ Nooto/
 
 Contributions are welcome! Open an issue before starting significant work so we can align on direction.
 
-If you find a security issue, please **do not open a public issue** -- contact me directly.
+If you find a security issue, please **do not open a public issue**, contact me directly.
 
 ---
 
