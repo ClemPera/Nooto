@@ -6,9 +6,6 @@ on:
       - 'server-v*'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build-linux:
     name: Build Linux Server (${{ matrix.arch }})
@@ -22,7 +19,8 @@ jobs:
             arch: aarch64
 
     runs-on: ${{ matrix.runner }}
-
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
 
@@ -66,7 +64,8 @@ jobs:
   push-docker:
     name: Push Docker Image
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
 
