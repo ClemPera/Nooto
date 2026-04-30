@@ -13,14 +13,14 @@
 
 ---
 
-> **Beta software** — Nooto is functional but still in active development. Expect rough edges.
-> **Security notice** — The encryption design has not been audited by an independent security expert. Use at your own discretion.
+> **Beta software** -- Nooto is functional but still in active development. Expect rough edges.
+> **Security notice** -- The encryption design has not been audited by an independent security expert. Use at your own discretion.
 
 ---
 
 ## Overview
 
-Nooto is a note-taking app that keeps your notes private. Everything is encrypted on your device before it ever leaves it, using strong AES-256-GCM encryption. Your password never reaches any server. Nobody but you can read your notes, not even us.
+Nooto is a note-taking app that keeps your notes private. Everything is encrypted on your device before it ever leaves it, using strong AES-256-GCM encryption. Nobody but you can read your notes, not even us.
 
 Sync is built in and works out of the box. It is optional and cross-device. If you want to go further, you can run your own server and keep full control over where your data is stored.
 
@@ -33,19 +33,19 @@ Sync is built in and works out of the box. It is optional and cross-device. If y
 
 ### What does the server actually store?
 
-Every note, including its title and metadata, is encrypted before leaving your device. Here is what our server holds for a given note:
+Every note, including its title and content, is encrypted before leaving your device. Here is what our server holds for a given note:
 
 ```
 uuid:     01938f2a-4b7c-7e1d-a2f3-9c8b1d2e3f4a
-content:  8f3a2c1bfe92d4a7c3b1e8f209d4a3c7b1e8f209d4...  (ciphertext)
-metadata: 2d1a8b3c4e5f7a9b2c1d8e3f4a5b6c7d8e9f0a1b...  (ciphertext)
+content:  8f3a2c1bfe92d4a7c3b1e8f209d4a3c7...  (ciphertext)
+metadata: 2d1a8b3c4e5f7a9b2c1d8e3f4a5b6c7d...  (ciphertext)
 ```
 
-That is all. No readable title, no readable content, no plaintext metadata.
+No readable title, no readable content, no plaintext of any kind.
 
 ### Encryption
 
-Notes are encrypted with **AES-256-GCM**, which is considered post-quantum resistant. Your password never reaches any server — it is used locally to derive your encryption key via **Argon2id**. The key never leaves your device.
+Notes are encrypted with **AES-256-GCM**, which is considered post-quantum resistant. Encryption keys are derived locally from your credentials via **Argon2id** and never leave your device.
 
 ---
 
@@ -102,13 +102,13 @@ npm run tauri android build -- --apk
 
 ## Sync
 
-Nooto includes a public server that is already configured inside the app. You can start syncing across devices without any setup by creating an account on the welcome screen.
+Nooto includes a public server already configured in the app. You can start syncing across devices without any setup by creating an account on the welcome screen.
 
 If you prefer to host your own server, see the section below.
 
 ### Self-hosting
 
-#### Using the pre-built Docker image (recommended)
+**1. Configure environment**
 
 ```sh
 cp .env.example .env
@@ -126,7 +126,9 @@ MARIADB_PASSWORD=a_strong_password
 SERVER_PORT=3000
 ```
 
-Then run the stack using the pre-built image from Docker Hub:
+**2. Start the stack**
+
+Using the pre-built image from Docker Hub:
 
 ```sh
 docker compose up -d
@@ -134,15 +136,13 @@ docker compose up -d
 
 This pulls `clempera8/nooto-server` and starts it alongside a MariaDB instance. Migrations run automatically on startup.
 
-#### Build the image locally
-
-If you want to build the server image yourself instead of pulling it:
+To build the image locally instead:
 
 ```sh
 docker compose up -d --build
 ```
 
-#### Binary (no Docker)
+Without Docker:
 
 ```sh
 cargo build --release -p nooto-server
@@ -150,28 +150,9 @@ export DATABASE_URL=mysql://nooto:password@localhost:3306/nooto
 ./target/release/nooto-server
 ```
 
-#### Connect the client to your server
+**3. Connect the client**
 
 When creating an account or logging in, open **Advanced settings** and enter your server URL.
-
----
-
-## Development
-
-```sh
-# Client (dev mode)
-cd client && npm install && npm run tauri dev
-
-# Server (dev mode)
-export DATABASE_URL=mysql://nooto:password@localhost:3306/nooto
-cargo run -p nooto-server
-
-# Frontend tests
-cd client && npm test
-
-# Server tests
-cargo test -p nooto-server
-```
 
 ---
 
@@ -193,7 +174,7 @@ Nooto/
 
 Contributions are welcome! Open an issue before starting significant work so we can align on direction.
 
-If you find a security issue, please **do not open a public issue** — contact me directly.
+If you find a security issue, please **do not open a public issue** -- contact me directly.
 
 ---
 
