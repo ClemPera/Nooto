@@ -51,13 +51,7 @@ Notes are encrypted with **AES-256-GCM**, which is considered post-quantum resis
 
 ## Screenshots
 
-> *Screenshots coming soon.*
->
-> <!-- Replace with actual screenshots once available -->
-> <!-- Suggested captures:
->      1. Full layout: sidebar (workspaces + notes list) + editor with a real note open
->      2. Main editor closeup with markdown rendered (heading, body, bullet list)
->      3. Login / unlock screen -->
+![Nooto main view](.github/assets/screenshot.png)
 
 ---
 
