@@ -6,9 +6,6 @@
 
 **Private notes. Yours alone.**
 
-A cross-platform, end-to-end encrypted note-taking app with optional self-hosted sync.  
-Your notes are encrypted on your device before they ever leave it.
-
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
 [![Beta](https://img.shields.io/badge/status-beta-orange)]()
 
@@ -16,20 +13,41 @@ Your notes are encrypted on your device before they ever leave it.
 
 ---
 
-> **⚠️ Beta software** — Nooto is functional but still in active development. Expect rough edges.  
-> **🔐 Security notice** — The encryption design has not been audited by an independent security expert. Use at your own discretion.
+> **Beta software** — Nooto is functional but still in active development. Expect rough edges.
+> **Security notice** — The encryption design has not been audited by an independent security expert. Use at your own discretion.
 
 ---
 
 ## Overview
 
-Nooto is a local-first note-taking application. Notes are stored on your device and encrypted with AES-256-GCM using a key that never leaves your machine. Sync is optional and self-hostable — when enabled, only encrypted blobs reach the server.
+Nooto is a note-taking app that keeps your notes private. Everything is encrypted on your device before it ever leaves it, using strong AES-256-GCM encryption. Your password never reaches any server. Nobody but you can read your notes, not even us.
 
-**Key properties:**
-- End-to-end encrypted — the server only ever sees ciphertext
-- Local-first — fully usable offline, no account required
-- Self-hosted sync — run your own server, keep full control of your data
-- Cross-platform — desktop (Linux, macOS, Windows) and Android
+Sync is built in and works out of the box. It is optional and cross-device. If you want to go further, you can run your own server and keep full control over where your data is stored.
+
+**At a glance:**
+- Notes are encrypted on your device before sync, no one can read them
+- Works fully offline, no account needed
+- Sync across your devices using the built-in public server or your own
+- Open source and auditable
+- Available on Linux, macOS, Windows and Android
+
+### What does the server actually store?
+
+Every note, including its title and metadata, is encrypted before leaving your device. Here is what our server holds for a given note:
+
+```
+uuid:     01938f2a-4b7c-7e1d-a2f3-9c8b1d2e3f4a
+content:  8f3a2c1bfe92d4a7c3b1e8f209d4a3c7b1e8f209d4...  (ciphertext)
+metadata: 2d1a8b3c4e5f7a9b2c1d8e3f4a5b6c7d8e9f0a1b...  (ciphertext)
+```
+
+That is all. No readable title, no readable content, no plaintext metadata.
+
+### Encryption
+
+Notes are encrypted with **AES-256-GCM**. Your password never reaches any server — it is used locally to derive your encryption key via **Argon2id**. The key never leaves your device.
+
+---
 
 ## Screenshots
 
@@ -37,21 +55,15 @@ Nooto is a local-first note-taking application. Notes are stored on your device 
 >
 > <!-- Replace with actual screenshots once available -->
 > <!-- Suggested captures:
->      1. Main editor with a note open (markdown rendered)
->      2. Sidebar showing workspaces + notes list
+>      1. Full layout: sidebar (workspaces + notes list) + editor with a real note open
+>      2. Main editor closeup with markdown rendered (heading, body, bullet list)
 >      3. Login / unlock screen -->
-
-## How it works
-
-At registration, a random **Master Encryption Key (MEK)** is generated on your device. It is encrypted with your password via Argon2id and AES-256-GCM before being sent to the server — the plaintext MEK never leaves your device. All note content and metadata are encrypted locally with this MEK before sync.
-
-See [`technical_infos.md`](./technical_infos.md) for the full cryptographic design.
 
 ---
 
 ## Installation
 
-### Desktop (pre-built binaries)
+### Pre-built releases
 
 Download the latest installer for your platform from the [Releases](https://github.com/ClemPera/Nooto/releases) page.
 
@@ -65,13 +77,12 @@ Download the latest installer for your platform from the [Releases](https://gith
 
 ### Build from source
 
-#### Prerequisites
-
+**Prerequisites:**
 - [Rust](https://rustup.rs/) (stable toolchain)
-- [Node.js](https://nodejs.org/) ≥ 20
+- [Node.js](https://nodejs.org/) >= 20
 - [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS
 
-#### Client (desktop)
+**Desktop:**
 
 ```sh
 cd client
@@ -79,9 +90,7 @@ npm install
 npm run tauri build
 ```
 
-The built installer and binary will be in `target/release/bundle/`.
-
-#### Client (Android)
+**Android:**
 
 ```sh
 cd client
@@ -89,23 +98,23 @@ npm install
 npm run tauri android build -- --apk
 ```
 
-Requires Android SDK and NDK. See the [Tauri Android guide](https://v2.tauri.app/start/prerequisites/#android) for setup.
-
 ---
 
-## Running the sync server
+## Sync
 
-The sync server is optional. Without it, Nooto works fully offline as a local note-taking app.
+Nooto includes a public server that is already configured inside the app. You can start syncing across devices without any setup by creating an account on the welcome screen.
 
-### With Docker (recommended)
+If you prefer to host your own server, see the section below.
 
-**1. Configure environment**
+### Self-hosting
+
+#### Using the pre-built Docker image (recommended)
 
 ```sh
 cp .env.example .env
 ```
 
-Edit `.env` and set secure passwords:
+Edit `.env` with your own passwords:
 
 ```env
 MARIADB_ROOT_PASSWORD=a_strong_root_password
@@ -117,68 +126,50 @@ MARIADB_PASSWORD=a_strong_password
 SERVER_PORT=3000
 ```
 
-**2. Start the stack**
+Then run the stack using the pre-built image from Docker Hub:
 
 ```sh
 docker compose up -d
 ```
 
-This starts a MariaDB instance and the `nooto-server`. Database migrations run automatically on startup.
+This pulls `clempera8/nooto-server` and starts it alongside a MariaDB instance. Migrations run automatically on startup.
 
-**3. Connect the client**
+#### Build the image locally
 
-In Nooto, go to **Settings → Sync** and enter your server URL (e.g. `http://your-server:3000`).
+If you want to build the server image yourself instead of pulling it:
 
-### Build the server manually
+```sh
+docker compose up -d --build
+```
+
+#### Binary (no Docker)
 
 ```sh
 cargo build --release -p nooto-server
-```
-
-The server reads `DATABASE_URL` from the environment:
-
-```sh
 export DATABASE_URL=mysql://nooto:password@localhost:3306/nooto
 ./target/release/nooto-server
 ```
 
-### Docker Hub
+#### Connect the client to your server
 
-A pre-built server image is available:
-
-```sh
-docker pull clempera8/nooto-server
-```
+When creating an account or logging in, open **Advanced settings** and enter your server URL.
 
 ---
 
 ## Development
 
-### Run the client in dev mode
-
 ```sh
-cd client
-npm install
-npm run tauri dev
-```
+# Client (dev mode)
+cd client && npm install && npm run tauri dev
 
-### Run the server in dev mode
-
-```sh
+# Server (dev mode)
 export DATABASE_URL=mysql://nooto:password@localhost:3306/nooto
 cargo run -p nooto-server
-```
 
-### Run frontend tests
+# Frontend tests
+cd client && npm test
 
-```sh
-cd client
-npm test
-```
-
-### Run server tests
-
-```sh
+# Server tests
 cargo test -p nooto-server
 ```
 
@@ -188,7 +179,7 @@ cargo test -p nooto-server
 
 ```
 Nooto/
-├── client/             # Tauri desktop & Android app
+├── client/             # Tauri desktop and Android app
 │   ├── src/            # React/TypeScript frontend
 │   └── src-tauri/      # Rust Tauri backend (local DB, crypto, sync)
 ├── server/             # Axum HTTP sync server
@@ -208,4 +199,4 @@ If you find a security issue, please **do not open a public issue** — contact 
 
 ## License
 
-[AGPL-3.0](./LICENSE) — self-hosting is and will always remain free.
+[AGPL-3.0](./LICENSE)
