@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/notto-server /usr/local/bin/nooto-server
+COPY --from=builder /app/target/release/nooto-server /usr/local/bin/nooto-server
 
 EXPOSE 3000
 
