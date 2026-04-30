@@ -45,7 +45,7 @@ That is all. No readable title, no readable content, no plaintext metadata.
 
 ### Encryption
 
-Notes are encrypted with **AES-256-GCM**. Your password never reaches any server — it is used locally to derive your encryption key via **Argon2id**. The key never leaves your device.
+Notes are encrypted with **AES-256-GCM**, which is considered post-quantum resistant. Your password never reaches any server — it is used locally to derive your encryption key via **Argon2id**. The key never leaves your device.
 
 ---
 
