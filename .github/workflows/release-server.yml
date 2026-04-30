@@ -46,7 +46,7 @@ jobs:
         run: cargo install cargo-generate-rpm
 
       - name: Build .rpm package
-        run: cargo generate-rpm --manifest-path server/Cargo.toml
+        run: cargo generate-rpm -p server
 
       - name: Create tarball
         run: |
