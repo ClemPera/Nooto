@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use chrono::Local;
 use mysql_async::{
     Conn, FromRowError, Row, params,
     prelude::{FromRow, Queryable},
@@ -17,6 +16,7 @@ pub struct Note {
     pub metadata_nonce: Vec<u8>,
     pub updated_at: i64,
     pub deleted: bool,
+    pub server_received_at: i64,
 }
 
 impl FromRow for Note {
@@ -30,6 +30,7 @@ impl FromRow for Note {
             metadata_nonce: row.get(5).ok_or(FromRowError(row.clone()))?,
             updated_at: row.get(6).ok_or(FromRowError(row.clone()))?,
             deleted: row.get(7).ok_or(FromRowError(row.clone()))?,
+            server_received_at: row.get(8).ok_or(FromRowError(row.clone()))?,
         })
     }
 }
@@ -45,6 +46,7 @@ impl From<shared::Note> for Note {
             metadata_nonce: note.metadata_nonce,
             updated_at: note.updated_at,
             deleted: note.deleted,
+            server_received_at: 0,
         }
     }
 }
@@ -58,6 +60,7 @@ impl Into<shared::Note> for Note {
             metadata: self.metadata,
             metadata_nonce: self.metadata_nonce,
             updated_at: self.updated_at,
+            server_received_at: self.server_received_at,
             deleted: self.deleted,
         }
     }
@@ -79,11 +82,12 @@ impl Note {
         .context("Failed to select note")
     }
 
-    /// Inserts a new note row. `updated_at` is set to the current server timestamp.
+    /// Inserts a new note row. `updated_at` is the client's logical edit time; `server_received_at` must be
+    /// set by the caller to the current server time before calling.
     pub async fn insert(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
-            "INSERT INTO note (uuid, id_user, content, nonce, metadata, metadata_nonce, updated_at, deleted) \
-            VALUES (:uuid, :id_user, :content, :nonce, :metadata, :metadata_nonce, :updated_at, :deleted)",
+            "INSERT INTO note (uuid, id_user, content, nonce, metadata, metadata_nonce, updated_at, deleted, server_received_at) \
+            VALUES (:uuid, :id_user, :content, :nonce, :metadata, :metadata_nonce, :updated_at, :deleted, :server_received_at)",
             params!(
                 "uuid" => &self.uuid,
                 "id_user" => &self.id_user,
@@ -91,27 +95,30 @@ impl Note {
                 "nonce" => &self.nonce,
                 "metadata" => &self.metadata,
                 "metadata_nonce" => &self.metadata_nonce,
-                "updated_at" => Local::now().to_utc().timestamp(),
+                "updated_at" => &self.updated_at,
                 "deleted" => &self.deleted,
+                "server_received_at" => &self.server_received_at,
             ),
         )
         .await
         .context("Failed to insert note")
     }
 
-    /// Updates an existing note's content, metadata, and timestamps. `updated_at` is set to now.
+    /// Updates an existing note's content and metadata. `updated_at` is the client's logical edit time;
+    /// `server_received_at` must be set by the caller to the current server time before calling.
     pub async fn update(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
             "UPDATE note \
-            SET content = :content, nonce = :nonce, metadata = :metadata, metadata_nonce = :metadata_nonce, updated_at = :updated_at, deleted = :deleted \
+            SET content = :content, nonce = :nonce, metadata = :metadata, metadata_nonce = :metadata_nonce, updated_at = :updated_at, deleted = :deleted, server_received_at = :server_received_at \
             WHERE uuid = :uuid",
             params!(
                 "content" => &self.content,
                 "nonce" => &self.nonce,
                 "metadata" => &self.metadata,
                 "metadata_nonce" => &self.metadata_nonce,
-                "updated_at" => Local::now().to_utc().timestamp(),
+                "updated_at" => &self.updated_at,
                 "deleted" => &self.deleted,
+                "server_received_at" => &self.server_received_at,
                 "uuid" => &self.uuid,
             ),
         )
@@ -119,17 +126,18 @@ impl Note {
         .context("Failed to update note")
     }
 
-    /// Returns all notes for a user updated after `after_datetime` (Unix timestamp).
+    /// Returns all notes for a user received by the server after `after_datetime` (Unix timestamp).
+    /// Filters on `server_received_at` so results are ordered by server arrival, not client clocks.
     pub async fn select_all_from_user(
         conn: &mut Conn,
         id_user: u32,
         after_datetime: i64,
     ) -> Result<Vec<Self>> {
         conn.exec(
-            "SELECT * FROM note WHERE id_user = :id_user AND updated_at > :updated_at",
+            "SELECT * FROM note WHERE id_user = :id_user AND server_received_at > :after",
             params!(
                 "id_user" => id_user,
-                "updated_at" => after_datetime
+                "after" => after_datetime
             ),
         )
         .await
@@ -301,6 +309,7 @@ mod tests {
             metadata: vec![9, 10, 11],
             metadata_nonce: vec![12, 13, 14],
             updated_at: 1700000000,
+            server_received_at: 0,
             deleted: false,
         }
     }
@@ -357,6 +366,7 @@ mod tests {
             metadata_nonce: vec![70, 80],
             updated_at: 9999,
             deleted: true,
+            server_received_at: 1234,
         };
 
         let shared: shared::Note = note.clone().into();
@@ -367,6 +377,7 @@ mod tests {
         assert_eq!(shared.metadata, note.metadata);
         assert_eq!(shared.metadata_nonce, note.metadata_nonce);
         assert_eq!(shared.updated_at, note.updated_at);
+        assert_eq!(shared.server_received_at, note.server_received_at);
         assert_eq!(shared.deleted, note.deleted);
     }
 

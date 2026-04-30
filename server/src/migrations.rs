@@ -5,6 +5,7 @@ use mysql_async::{Conn, params, prelude::Queryable};
 /// Append new entries here to add future migrations; never edit existing ones.
 static MIGRATIONS: &[(u32, &str)] = &[
     (1, include_str!("../migrations/V1__init.sql")),
+    (2, include_str!("../migrations/V2__note_server_received_at.sql")),
 ];
 
 /// Creates the tracking table if absent, then runs every migration whose version

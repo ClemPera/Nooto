@@ -195,23 +195,25 @@ async fn send_notes(
                 } else {
                     let mut updated_note: schema::Note = note.into();
                     updated_note.id_user = Some(user_id);
+                    updated_note.server_received_at = chrono::Local::now().to_utc().timestamp();
                     updated_note.update(&mut conn).await.map_err(AppError::from)?;
 
                     result.push(SentNotesResult {
                         uuid: updated_note.uuid,
-                        status: shared::NoteStatus::Ok,
+                        status: shared::NoteStatus::Ok(updated_note.server_received_at),
                     });
                 }
             }
             None => {
                 let mut srv_note: schema::Note = note.into();
                 srv_note.id_user = Some(user_id);
+                srv_note.server_received_at = chrono::Local::now().to_utc().timestamp();
 
                 srv_note.insert(&mut conn).await.map_err(AppError::from)?;
 
                 result.push(SentNotesResult {
                     uuid: srv_note.uuid,
-                    status: shared::NoteStatus::Ok,
+                    status: shared::NoteStatus::Ok(srv_note.server_received_at),
                 });
             }
         }
