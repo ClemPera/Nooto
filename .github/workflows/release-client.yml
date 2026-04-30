@@ -6,9 +6,6 @@ on:
       - 'client-v*'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build-desktop:
     strategy:
@@ -44,7 +41,8 @@ jobs:
             binary: nooto.exe
 
     runs-on: ${{ matrix.runner }}
-
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
 
@@ -116,7 +114,8 @@ jobs:
   build-android:
     name: Build Android
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
 
