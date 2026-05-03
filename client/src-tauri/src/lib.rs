@@ -50,10 +50,10 @@ pub fn run() {
                 workspace: None,
             });
 
+            app.manage(app_state);
+
             let app_handle_clone = app.app_handle().clone();
             tauri::async_runtime::spawn(sync::service::run(app_handle_clone));
-
-            app.manage(app_state);
 
             Ok(())
         })
