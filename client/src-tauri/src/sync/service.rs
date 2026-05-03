@@ -102,7 +102,7 @@ fn emit<S: Serialize + Clone>(handle: &AppHandle, event: &str, payload: S) {
 }
 
 /// Fetches notes updated after `last_seen` from the server, stores them locally,
-/// and emits `new_note_metadata`. Returns the highest `updated_at` among received notes.
+/// and emits `new_note_metadata`. Returns the highest `server_received_at` among received notes.
 pub async fn receive_latest_notes(
     state: &Mutex<AppState>,
     workspace: Workspace,
@@ -122,7 +122,7 @@ pub async fn receive_latest_notes(
         return Ok(None);
     }
 
-    let max_updated_at = notes.iter().map(|n| n.updated_at).max();
+    let max_updated_at = notes.iter().map(|n| n.server_received_at).max();
 
     let state = state.lock().await;
     let conn = state.database.lock().await;
@@ -165,7 +165,7 @@ pub async fn receive_latest_notes(
 
 /// Collects all unsynced local notes and pushes them to the server.
 /// Marks successfully uploaded notes as synced; emits `conflict` for any conflicting ones.
-/// Returns the highest `updated_at` among sent notes.
+/// Returns the highest `server_received_at` among sent notes.
 pub async fn send_latest_notes(
     state: &Mutex<AppState>,
     workspace: Workspace,
@@ -183,7 +183,7 @@ pub async fn send_latest_notes(
             .collect()
     };
 
-    let max_updated_at = unsynced_notes.iter().map(|n| n.updated_at).max();
+    let mut max_server_received_at: Option<i64> = None;
 
     if !unsynced_notes.is_empty() {
         debug!("sending modified notes...");
@@ -208,12 +208,17 @@ pub async fn send_latest_notes(
 
         for result in results {
             match result.status {
-                shared::NoteStatus::Ok => {
+                shared::NoteStatus::Ok(server_received_at) => {
                     let mut note = Note::select(&conn, result.uuid.clone())
                         .context("Failed to find sent note in database")?
                         .ok_or_else(|| anyhow::anyhow!("Sent note '{}' not found", result.uuid))?;
                     note.synched = true;
                     note.update(&conn).context("Failed to mark note as synched")?;
+
+                    max_server_received_at = Some(
+                        max_server_received_at
+                            .map_or(server_received_at, |m: i64| m.max(server_received_at)),
+                    );
                 }
                 shared::NoteStatus::Conflict(conflicted_note) => {
                     info!("Note {:?} is in conflict (server side)", conflicted_note.uuid);
@@ -225,7 +230,7 @@ pub async fn send_latest_notes(
         }
     }
 
-    Ok(max_updated_at)
+    Ok(max_server_received_at)
 }
 
 /// Advances `last_sync_at` to `timestamp + 1` in both the in-memory state and the database.

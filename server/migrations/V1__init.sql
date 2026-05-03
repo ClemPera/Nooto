@@ -26,14 +26,15 @@ CREATE TABLE IF NOT EXISTS `user_token` (
 );
 
 CREATE TABLE IF NOT EXISTS `note` (
-    `uuid`              VARCHAR(36)     NOT NULL,
-    `id_user`           INT UNSIGNED    NOT NULL,
-    `content`           MEDIUMBLOB      NOT NULL,
-    `nonce`             BLOB            NOT NULL,
-    `metadata`          BLOB            NOT NULL,
-    `metadata_nonce`    BLOB            NOT NULL,
-    `updated_at`        BIGINT          NOT NULL,
-    `deleted`           TINYINT(1)      NOT NULL DEFAULT 0,
+    `uuid`                  VARCHAR(36)     NOT NULL,
+    `id_user`               INT UNSIGNED    NOT NULL,
+    `content`               MEDIUMBLOB      NOT NULL,
+    `nonce`                 BLOB            NOT NULL,
+    `metadata`              BLOB            NOT NULL,
+    `metadata_nonce`        BLOB            NOT NULL,
+    `updated_at`            BIGINT          NOT NULL,
+    `deleted`               TINYINT(1)      NOT NULL DEFAULT 0,
+    `server_received_at`    BIGINT          NOT NULL DEFAULT 0,
     PRIMARY KEY (`uuid`, `id_user`),
     FOREIGN KEY (`id_user`) REFERENCES `user` (`id`) ON DELETE CASCADE
 );

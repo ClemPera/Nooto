@@ -43,6 +43,7 @@ impl Into<shared::Note> for Note {
             metadata: self.metadata,
             metadata_nonce: self.metadata_nonce,
             updated_at: self.updated_at,
+            server_received_at: 0,
             deleted: self.deleted,
         }
     }
@@ -458,6 +459,7 @@ mod tests {
             metadata: vec![],
             metadata_nonce: vec![],
             updated_at: 0,
+            server_received_at: 0,
             deleted: false,
         };
         let note = Note::from(shared);
@@ -482,6 +484,7 @@ mod tests {
             metadata: vec![3, 2, 1],
             metadata_nonce: vec![0],
             updated_at: 42,
+            server_received_at: 0,
             deleted: true,
         };
         let local = Note::from(original.clone());

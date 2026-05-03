@@ -639,7 +639,7 @@ pub async fn handle_conflict(
 
             for result in results {
                 match result.status {
-                    shared::NoteStatus::Ok => {}
+                    shared::NoteStatus::Ok(_) => {}
                     shared::NoteStatus::Conflict(conflicted_note) => {
                         error!(
                             "Conflict in conflict handling, this shouldn't happen: {:?}",

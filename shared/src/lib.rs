@@ -28,6 +28,7 @@ pub struct Note {
     pub metadata: Vec<u8>,
     pub metadata_nonce: Vec<u8>,
     pub updated_at: i64,
+    pub server_received_at: i64,
     pub deleted: bool
 }
 
@@ -58,10 +59,9 @@ pub struct SentNotes {
 }
 
 /// Per-note outcome returned by `POST /notes`.
-/// `Conflict` carries the server version so the client can present a diff.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum NoteStatus {
-    Ok,
+    Ok(i64),
     Conflict(Note),
 }
 
