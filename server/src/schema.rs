@@ -82,8 +82,7 @@ impl Note {
         .context("Failed to select note")
     }
 
-    /// Inserts a new note row. `updated_at` is the client's logical edit time; `server_received_at` must be
-    /// set by the caller to the current server time before calling.
+    /// Inserts a new note row. Caller must set `server_received_at` before calling.
     pub async fn insert(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
             "INSERT INTO note (uuid, id_user, content, nonce, metadata, metadata_nonce, updated_at, deleted, server_received_at) \
@@ -104,8 +103,7 @@ impl Note {
         .context("Failed to insert note")
     }
 
-    /// Updates an existing note's content and metadata. `updated_at` is the client's logical edit time;
-    /// `server_received_at` must be set by the caller to the current server time before calling.
+    /// Updates an existing note. Caller must set `server_received_at` before calling.
     pub async fn update(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
             "UPDATE note \
@@ -126,8 +124,6 @@ impl Note {
         .context("Failed to update note")
     }
 
-    /// Returns all notes for a user received by the server after `after_datetime` (Unix timestamp).
-    /// Filters on `server_received_at` so results are ordered by server arrival, not client clocks.
     pub async fn select_all_from_user(
         conn: &mut Conn,
         id_user: u32,

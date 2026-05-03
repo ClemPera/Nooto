@@ -102,7 +102,7 @@ fn emit<S: Serialize + Clone>(handle: &AppHandle, event: &str, payload: S) {
 }
 
 /// Fetches notes updated after `last_seen` from the server, stores them locally,
-/// and emits `new_note_metadata`. Returns the highest `updated_at` among received notes.
+/// and emits `new_note_metadata`. Returns the highest `server_received_at` among received notes.
 pub async fn receive_latest_notes(
     state: &Mutex<AppState>,
     workspace: Workspace,
@@ -165,7 +165,7 @@ pub async fn receive_latest_notes(
 
 /// Collects all unsynced local notes and pushes them to the server.
 /// Marks successfully uploaded notes as synced; emits `conflict` for any conflicting ones.
-/// Returns the highest `updated_at` among sent notes.
+/// Returns the highest `server_received_at` among sent notes.
 pub async fn send_latest_notes(
     state: &Mutex<AppState>,
     workspace: Workspace,

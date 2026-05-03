@@ -28,8 +28,6 @@ pub struct Note {
     pub metadata: Vec<u8>,
     pub metadata_nonce: Vec<u8>,
     pub updated_at: i64,
-    /// Timestamp set by the server when the note was last received. Used by clients
-    /// to advance `last_sync_at` independently of client clock skew.
     pub server_received_at: i64,
     pub deleted: bool
 }
@@ -61,8 +59,6 @@ pub struct SentNotes {
 }
 
 /// Per-note outcome returned by `POST /notes`.
-/// `Ok` carries the server's receive timestamp so the client can advance `last_sync_at`.
-/// `Conflict` carries the server version so the client can present a diff.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum NoteStatus {
     Ok(i64),
