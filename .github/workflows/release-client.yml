@@ -159,9 +159,13 @@ jobs:
         working-directory: client
         run: npm install
 
-      - name: Setup Android keystore
+      - name: setup Android signing
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 --decode > ${{ runner.temp }}/nooto.keystore
+          cd src-tauri/gen/android
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
+          echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
+          base64 -d <<< "${{ secrets.ANDROID_KEYSTORE }}" > $RUNNER_TEMP/keystore.jks
+          echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
 
       - name: Build Android APK
         working-directory: client
@@ -169,22 +173,33 @@ jobs:
           NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: npm run tauri android build -- --apk
 
-      - name: Sign APK
-        run: |
-          UNSIGNED_APK=$(find client/src-tauri/gen/android -name "*.apk" | head -1)
-          SIGNED_APK="${UNSIGNED_APK%.apk}-signed.apk"
-          "$ANDROID_SDK_ROOT/build-tools/$(ls $ANDROID_SDK_ROOT/build-tools | tail -1)/apksigner" sign \
-            --ks ${{ runner.temp }}/nooto.keystore \
-            --ks-key-alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
-            --ks-pass pass:"${{ secrets.ANDROID_STORE_PASSWORD }}" \
-            --key-pass pass:"${{ secrets.ANDROID_KEY_PASSWORD }}" \
-            --out "$SIGNED_APK" \
-            "$UNSIGNED_APK"
-          echo "SIGNED_APK=$SIGNED_APK" >> "$GITHUB_ENV"
-
       - name: Find APK artifacts
         run: |
-          echo "APK_FILES=$SIGNED_APK" >> "$GITHUB_ENV"
+          find client/src-tauri/gen/android -name "*.apk" | tee apk-paths.txt
+          echo "APK_FILES=$(cat apk-paths.txt | tr '\n' ',' | sed 's/,$//')" >> "$GITHUB_ENV"
+        
+      # - name: Setup Android keystore
+      #   run: |
+      #     echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 --decode > ${{ runner.temp }}/nooto.keystore
+        
+
+      # - name: Sign APK
+      #   run: |
+      #     UNSIGNED_APK=$(find client/src-tauri/gen/android -name "*.apk" | head -1)
+      #     SIGNED_APK="${UNSIGNED_APK%.apk}-signed.apk"
+      #     "$ANDROID_SDK_ROOT/build-tools/$(ls $ANDROID_SDK_ROOT/build-tools | tail -1)/apksigner" sign \
+      #       --ks ${{ runner.temp }}/nooto.keystore \
+      #       --ks-key-alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
+      #       --ks-pass pass:"${{ secrets.ANDROID_STORE_PASSWORD }}" \
+      #       --key-pass pass:"${{ secrets.ANDROID_KEY_PASSWORD }}" \
+      #       --out "$SIGNED_APK" \
+      #       "$UNSIGNED_APK"
+      #     echo "SIGNED_APK=$SIGNED_APK" >> "$GITHUB_ENV"
+
+      # - name: Find APK artifacts
+      #   run: |
+          # echo "APK_FILES=$SIGNED_APK" >> "$GITHUB_ENV"
+
 
       - uses: softprops/action-gh-release@v2
         with:
