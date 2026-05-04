@@ -163,28 +163,29 @@ jobs:
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 --decode > ${{ runner.temp }}/nooto.keystore
 
-      - name: Build Android APK
+      - name: Build Android AAB
         working-directory: client
         env:
           NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
-        run: npm run tauri android build -- --apk
+        run: npm run tauri android build
 
-      - name: Sign APK
+      - name: Install bundletool
         run: |
-          UNSIGNED_APK=$(find client/src-tauri/gen/android -name "*.apk" | head -1)
-          SIGNED_APK="${UNSIGNED_APK%.apk}-signed.apk"
-          "$ANDROID_SDK_ROOT/build-tools/$(ls $ANDROID_SDK_ROOT/build-tools | tail -1)/apksigner" sign \
-            --ks ${{ runner.temp }}/nooto.keystore \
-            --ks-key-alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
-            --ks-pass pass:"${{ secrets.ANDROID_STORE_PASSWORD }}" \
-            --key-pass pass:"${{ secrets.ANDROID_KEY_PASSWORD }}" \
-            --out "$SIGNED_APK" \
-            "$UNSIGNED_APK"
-          echo "SIGNED_APK=$SIGNED_APK" >> "$GITHUB_ENV"
+          wget -q https://github.com/google/bundletool/releases/latest/download/bundletool-all.jar -O /usr/local/bin/bundletool.jar
 
-      - name: Find APK artifacts
+      - name: Build and sign universal APK via bundletool
         run: |
-          echo "APK_FILES=$SIGNED_APK" >> "$GITHUB_ENV"
+          AAB=$(find client/src-tauri/gen/android -name "*.aab" | head -1)
+          bundletool build-apks \
+            --bundle="$AAB" \
+            --output="${{ runner.temp }}/nooto.apks" \
+            --mode=universal \
+            --ks="${{ runner.temp }}/nooto.keystore" \
+            --ks-key-alias="${{ secrets.ANDROID_KEY_ALIAS }}" \
+            --ks-pass=pass:"${{ secrets.ANDROID_STORE_PASSWORD }}" \
+            --key-pass=pass:"${{ secrets.ANDROID_KEY_PASSWORD }}"
+          unzip "${{ runner.temp }}/nooto.apks" universal.apk -d "${{ runner.temp }}/nooto-apks"
+          echo "APK_FILES=${{ runner.temp }}/nooto-apks/universal.apk" >> "$GITHUB_ENV"
 
       - uses: softprops/action-gh-release@v2
         with:
