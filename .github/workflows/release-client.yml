@@ -160,6 +160,7 @@ jobs:
         run: npm install
 
       - name: setup Android signing
+        working-directory: client
         run: |
           cd src-tauri/gen/android
           echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
