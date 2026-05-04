@@ -159,9 +159,14 @@ jobs:
         working-directory: client
         run: npm install
 
-      - name: Setup Android keystore
+      - name: setup Android signing
+        working-directory: client
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 --decode > ${{ runner.temp }}/nooto.keystore
+          cd src-tauri/gen/android
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
+          echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
+          base64 -d <<< "${{ secrets.ANDROID_KEYSTORE }}" > $RUNNER_TEMP/keystore.jks
+          echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
 
       - name: Build Android AAB
         working-directory: client
@@ -169,23 +174,10 @@ jobs:
           NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: npm run tauri android build
 
-      - name: Install bundletool
+      - name: Find APK artifacts
         run: |
-          wget -q https://github.com/google/bundletool/releases/latest/download/bundletool-all.jar -O /usr/local/bin/bundletool.jar
-
-      - name: Build and sign universal APK via bundletool
-        run: |
-          AAB=$(find client/src-tauri/gen/android -name "*.aab" | head -1)
-          bundletool build-apks \
-            --bundle="$AAB" \
-            --output="${{ runner.temp }}/nooto.apks" \
-            --mode=universal \
-            --ks="${{ runner.temp }}/nooto.keystore" \
-            --ks-key-alias="${{ secrets.ANDROID_KEY_ALIAS }}" \
-            --ks-pass=pass:"${{ secrets.ANDROID_STORE_PASSWORD }}" \
-            --key-pass=pass:"${{ secrets.ANDROID_KEY_PASSWORD }}"
-          unzip "${{ runner.temp }}/nooto.apks" universal.apk -d "${{ runner.temp }}/nooto-apks"
-          echo "APK_FILES=${{ runner.temp }}/nooto-apks/universal.apk" >> "$GITHUB_ENV"
+          find client/src-tauri/gen/android -name "*.apk" | tee apk-paths.txt
+          echo "APK_FILES=$(cat apk-paths.txt | tr '\n' ',' | sed 's/,$//')" >> "$GITHUB_ENV"
 
       - uses: softprops/action-gh-release@v2
         with:
