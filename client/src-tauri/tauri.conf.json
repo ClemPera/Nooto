@@ -34,7 +34,7 @@
     ],
     "shortDescription": "Encrypted notes with sync",
     "longDescription": "Nooto is a privacy-first notes application with end-to-end encryption and optional self-hosted sync.",
-    "category": "Office",
+    "category": "Productivity",
     "copyright": "© 2025 Clément Pera",
     "linux": {
       "deb": {},
