@@ -26,10 +26,25 @@
     "targets": "all",
     "icon": [
       "icons/32x32.png",
+      "icons/64x64.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "shortDescription": "Encrypted notes with sync",
+    "longDescription": "Nooto is a privacy-first notes application with end-to-end encryption and optional self-hosted sync.",
+    "category": "Office",
+    "copyright": "© 2025 Clément Pera",
+    "linux": {
+      "deb": {},
+      "rpm": {},
+      "appimage": {}
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }
