@@ -139,7 +139,7 @@ jobs:
       - name: Setup NDK toolchain wrappers
         run: |
           NDK_BIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
-          for TRIPLE in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android; do
+          for TRIPLE in aarch64-linux-android; do
             ln -sf $NDK_BIN/llvm-ranlib $NDK_BIN/$TRIPLE-ranlib
             ln -sf $NDK_BIN/llvm-ar     $NDK_BIN/$TRIPLE-ar
           done
@@ -147,11 +147,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: >-
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android,
-            i686-linux-android
+          targets: aarch64-linux-android
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -177,7 +173,7 @@ jobs:
           NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: |
           export RUSTFLAGS="--remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$PWD=/build"
-          npm run tauri android build
+          npm run tauri android build -- --split-per-abi --target aarch64
 
       - name: Find APK artifacts
         run: |
