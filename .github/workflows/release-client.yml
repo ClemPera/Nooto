@@ -174,7 +174,7 @@ jobs:
           NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: |
           export RUSTFLAGS="--remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$PWD=/build"
-          npm run tauri android build -- --split-per-abi --target aarch64
+          npm run tauri android build -- --apk --split-per-abi --target aarch64
 
       - name: Find APK artifacts
         run: |
