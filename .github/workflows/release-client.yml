@@ -147,6 +147,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.98.0
           targets: aarch64-linux-android
 
       - uses: Swatinem/rust-cache@v2
