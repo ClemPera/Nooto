@@ -38,5 +38,11 @@ tokio = "1.48"
 hex = "0.4"
 uuid = { version = "1.19", features = ["v7"] }
 
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"
+
 # [lints.rust]
 # unused_imports = "allow"
