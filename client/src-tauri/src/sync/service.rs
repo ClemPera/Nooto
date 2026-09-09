@@ -109,13 +109,14 @@ pub async fn receive_latest_notes(
     last_seen: i64,
     handle: &AppHandle,
 ) -> Result<Option<i64>> {
+    let token = workspace.token.clone().context("Workspace has no token")?;
+
     let params = SelectNotesParams {
         username: workspace.username.clone().context("Workspace has no username")?,
-        token: hex::encode(workspace.token.clone().context("Workspace has no token")?),
         updated_at: last_seen,
     };
 
-    let notes = sync::operations::select_notes(params, workspace.instance.clone().context("Workspace has no instance")?)
+    let notes = sync::operations::select_notes(params, &token, workspace.instance.clone().context("Workspace has no instance")?)
         .await?;
 
     if notes.is_empty() {

@@ -32,19 +32,17 @@ pub struct Note {
     pub deleted: bool
 }
 
-/// Query parameters for `GET /notes` — fetches notes updated after `updated_at`.
+/// Query parameters for `GET /notes`; token goes in the Authorization header, not here.
 #[derive(Deserialize, Serialize, Debug)]
 pub struct SelectNotesParams {
     pub username: String,
-    pub token: String,
     pub updated_at: i64
 }
 
-/// Query parameters for `GET /note` — fetches a single note by UUID.
+/// Query parameters for `GET /note`; token goes in the Authorization header, not here.
 #[derive(Deserialize, Serialize, Debug)]
 pub struct SelectNoteParams {
     pub username: String,
-    pub token: String,
     pub note_id: String
 }
 
@@ -98,5 +96,12 @@ pub struct Login {
     pub salt_data: String,
     pub encrypted_mek_password: Vec<u8>,
     pub mek_password_nonce: Vec<u8>,
+    pub token: Vec<u8>,
+}
+
+/// Payload for `POST /logout` — revokes a single session token.
+#[derive(Deserialize, Serialize, Debug)]
+pub struct LogoutParams {
+    pub username: String,
     pub token: Vec<u8>,
 }

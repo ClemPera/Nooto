@@ -104,11 +104,12 @@ impl Note {
     }
 
     /// Updates an existing note. Caller must set `server_received_at` before calling.
-    pub async fn update(&self, conn: &mut Conn) -> Result<()> {
+    /// id_user prevents cross-account overwrites when two users share a uuid.
+    pub async fn update(&self, conn: &mut Conn, id_user: u32) -> Result<()> {
         conn.exec_drop(
             "UPDATE note \
             SET content = :content, nonce = :nonce, metadata = :metadata, metadata_nonce = :metadata_nonce, updated_at = :updated_at, deleted = :deleted, server_received_at = :server_received_at \
-            WHERE uuid = :uuid",
+            WHERE uuid = :uuid AND id_user = :id_user",
             params!(
                 "content" => &self.content,
                 "nonce" => &self.nonce,
@@ -118,6 +119,7 @@ impl Note {
                 "deleted" => &self.deleted,
                 "server_received_at" => &self.server_received_at,
                 "uuid" => &self.uuid,
+                "id_user" => id_user,
             ),
         )
         .await
@@ -158,6 +160,8 @@ pub struct User {
     pub salt_recovery_data: String,
     pub salt_server_auth: String,
     pub salt_server_recovery: String,
+    /// 1 = legacy (raw login_hash); 2 = hardened (Argon2id(login_hash)).
+    pub password_hash_version: u8,
 }
 
 impl FromRow for User {
@@ -177,6 +181,7 @@ impl FromRow for User {
             salt_recovery_data: row.get(11).ok_or(FromRowError(row.clone()))?,
             salt_server_auth: row.get(12).ok_or(FromRowError(row.clone()))?,
             salt_server_recovery: row.get(13).ok_or(FromRowError(row.clone()))?,
+            password_hash_version: row.get(14).ok_or(FromRowError(row.clone()))?,
         })
     }
 }
@@ -198,6 +203,8 @@ impl From<shared::User> for User {
             salt_recovery_data: user.salt_recovery_data,
             salt_server_auth: user.salt_server_auth,
             salt_server_recovery: user.salt_server_recovery,
+            // insert_user() must hash and override this before inserting.
+            password_hash_version: 1,
         }
     }
 }
@@ -217,13 +224,25 @@ impl User {
         .context("Failed to select user")
     }
 
+    /// Users still below `current_version`; used by the startup migration.
+    pub async fn select_outdated_password_hashes(conn: &mut Conn, current_version: u8) -> Result<Vec<Self>> {
+        conn.exec(
+            "SELECT * FROM user WHERE password_hash_version < :current_version",
+            params!(
+                "current_version" => current_version
+            ),
+        )
+        .await
+        .context("Failed to select users with an outdated password hash format")
+    }
+
     /// Inserts a new user row with all encryption material.
     pub async fn insert(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
             "INSERT INTO user (username, stored_password_hash, stored_recovery_hash, encrypted_mek_password, mek_password_nonce,
-                encrypted_mek_recovery, mek_recovery_nonce, salt_auth, salt_data, salt_recovery_auth, salt_recovery_data, salt_server_auth, salt_server_recovery) \
+                encrypted_mek_recovery, mek_recovery_nonce, salt_auth, salt_data, salt_recovery_auth, salt_recovery_data, salt_server_auth, salt_server_recovery, password_hash_version) \
             VALUES (:username, :stored_password_hash, :stored_recovery_hash, :encrypted_mek_password, :mek_password_nonce, :encrypted_mek_recovery, :mek_recovery_nonce, :salt_auth, \
-                :salt_data, :salt_recovery_auth, :salt_recovery_data, :salt_server_auth, :salt_server_recovery)",
+                :salt_data, :salt_recovery_auth, :salt_recovery_data, :salt_server_auth, :salt_server_recovery, :password_hash_version)",
             params!(
                 "username" => &self.username,
                 "stored_password_hash" => &self.stored_password_hash,
@@ -238,10 +257,31 @@ impl User {
                 "salt_recovery_data" => &self.salt_recovery_data,
                 "salt_server_auth" => &self.salt_server_auth,
                 "salt_server_recovery" => &self.salt_server_recovery,
+                "password_hash_version" => &self.password_hash_version,
             ),
         )
         .await
         .context("Failed to insert user")
+    }
+
+    /// Overwrites the stored password hash and version for one user.
+    pub async fn update_password_hash(
+        conn: &mut Conn,
+        id: u32,
+        stored_password_hash: &str,
+        password_hash_version: u8,
+    ) -> Result<()> {
+        conn.exec_drop(
+            "UPDATE user SET stored_password_hash = :stored_password_hash, password_hash_version = :password_hash_version \
+            WHERE id = :id",
+            params!(
+                "stored_password_hash" => stored_password_hash,
+                "password_hash_version" => password_hash_version,
+                "id" => id,
+            ),
+        )
+        .await
+        .context("Failed to update password hash")
     }
 }
 
@@ -251,6 +291,8 @@ pub struct UserToken {
     pub id: Option<u32>,
     pub id_user: u32,
     pub token: Vec<u8>,
+    /// Refreshed by `touch()` on use; drives idle expiration in `user_verify()`.
+    pub last_used_at: i64,
 }
 
 impl FromRow for UserToken {
@@ -259,6 +301,7 @@ impl FromRow for UserToken {
             id: row.get(0).ok_or(FromRowError(row.clone()))?,
             id_user: row.get(1).ok_or(FromRowError(row.clone()))?,
             token: row.get(2).ok_or(FromRowError(row.clone()))?,
+            last_used_at: row.get(3).ok_or(FromRowError(row.clone()))?,
         })
     }
 }
@@ -269,11 +312,12 @@ impl UserToken {
     /// Inserts a new session token for the user.
     pub async fn insert(&self, conn: &mut Conn) -> Result<()> {
         conn.exec_drop(
-            "INSERT INTO user_token (id_user, token) \
-            VALUES (:id_user, :token)",
+            "INSERT INTO user_token (id_user, token, last_used_at) \
+            VALUES (:id_user, :token, :last_used_at)",
             params!(
                 "id_user" => &self.id_user,
                 "token" => &self.token,
+                "last_used_at" => &self.last_used_at,
             ),
         )
         .await
@@ -290,6 +334,33 @@ impl UserToken {
         )
         .await
         .context("Failed to select user tokens")
+    }
+
+    /// Deletes a single session token, scoped to the owning user.
+    pub async fn delete(conn: &mut Conn, id_user: u32, token: &[u8]) -> Result<()> {
+        conn.exec_drop(
+            "DELETE FROM user_token WHERE id_user = :id_user AND token = :token",
+            params!(
+                "id_user" => id_user,
+                "token" => token,
+            ),
+        )
+        .await
+        .context("Failed to delete user token")
+    }
+
+    /// Refreshes a token's `last_used_at` so its idle-expiration window slides forward.
+    pub async fn touch(conn: &mut Conn, id_user: u32, token: &[u8], now: i64) -> Result<()> {
+        conn.exec_drop(
+            "UPDATE user_token SET last_used_at = :last_used_at WHERE id_user = :id_user AND token = :token",
+            params!(
+                "last_used_at" => now,
+                "id_user" => id_user,
+                "token" => token,
+            ),
+        )
+        .await
+        .context("Failed to refresh user token")
     }
 }
 

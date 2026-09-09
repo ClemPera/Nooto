@@ -21,12 +21,13 @@ pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared
 }
 
 /// `GET /notes` — fetches notes updated after the timestamp in `params`.
-pub async fn select_notes(params: SelectNotesParams, instance: String) -> Result<Vec<Note>> {
+pub async fn select_notes(params: SelectNotesParams, token: &[u8], instance: String) -> Result<Vec<Note>> {
     let client = reqwest::Client::new();
 
     let response = client
         .get(instance + "/notes")
         .query(&params)
+        .bearer_auth(hex::encode(token))
         .send()
         .await
         .context("Could not reach the server")?
@@ -40,12 +41,13 @@ pub async fn select_notes(params: SelectNotesParams, instance: String) -> Result
 }
 
 /// `GET /note` — fetches a single note by UUID.
-pub async fn select_note(params: SelectNoteParams, instance: String) -> Result<Note> {
+pub async fn select_note(params: SelectNoteParams, token: &[u8], instance: String) -> Result<Note> {
     let client = reqwest::Client::new();
 
     let response = client
         .get(instance + "/note")
         .query(&params)
+        .bearer_auth(hex::encode(token))
         .send()
         .await
         .context("Could not reach the server")?

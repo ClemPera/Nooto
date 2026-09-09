@@ -671,11 +671,10 @@ pub async fn handle_conflict(
 
             let params = SelectNoteParams {
                 username,
-                token: hex::encode(token),
                 note_id: id,
             };
 
-            let note = sync::operations::select_note(params, instance).await?;
+            let note = sync::operations::select_note(params, &token, instance).await?;
 
             {
                 let conn = state.database.lock().await;
