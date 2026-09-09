@@ -6,4 +6,4 @@ members = ["shared", "client/src-tauri", "server"]
 strip = true
 lto = true
 codegen-units = 1
-opt-level = "s"
+opt-level = "z"
