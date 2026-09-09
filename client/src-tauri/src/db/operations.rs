@@ -7,7 +7,7 @@ use uuid::{NoContext, Uuid};
 
 use crate::{
     crypt::{self, NoteData},
-    db::schema::{Common, Note, Workspace},
+    db::schema::{Common, Image, Note, Workspace},
 };
 
 //TODO: refactor this, data encryption and stuff should not be inside db?
@@ -121,6 +121,53 @@ pub fn update_note(conn: &Connection, note_data: NoteData, mek: Key<Aes256Gcm>) 
 
     debug!("note updated: dt:{}", note.updated_at);
     Ok(())
+}
+
+/// Encrypts `bytes` with the workspace MEK and stores them locally as an unsynced image
+/// linked to `note_id`. Returns the new image's UUID.
+pub fn insert_image(
+    conn: &Connection,
+    id_workspace: u32,
+    note_id: String,
+    bytes: &[u8],
+    mek: Key<Aes256Gcm>,
+) -> Result<String> {
+    let (content, nonce) = crypt::encrypt_data(bytes, &mek).context("Failed to encrypt image")?;
+
+    let image = Image {
+        uuid: Uuid::new_v7(uuid::Timestamp::now(NoContext)).to_string(),
+        note_uuid: note_id,
+        id_workspace: Some(id_workspace),
+        content,
+        nonce,
+        synched: false,
+    };
+
+    image.insert(conn).context("Failed to save new image")?;
+
+    Ok(image.uuid)
+}
+
+/// Fetches and decrypts a locally cached image by UUID. Returns `None` if not cached.
+pub fn get_local_image(conn: &Connection, uuid: String, mek: Key<Aes256Gcm>) -> Result<Option<Vec<u8>>> {
+    let image = match Image::select(conn, uuid).context("Failed to read image from database")? {
+        Some(image) => image,
+        None => return Ok(None),
+    };
+
+    let plaintext = crypt::decrypt_data(&image.content, &image.nonce, &mek)
+        .context("Failed to decrypt image")?;
+
+    Ok(Some(plaintext))
+}
+
+/// Caches an image fetched from the server locally, marked as already synced.
+pub fn cache_remote_image(conn: &Connection, id_workspace: u32, image: shared::Image) -> Result<()> {
+    let mut local_image = Image::from(image);
+    local_image.id_workspace = Some(id_workspace);
+    local_image.synched = true;
+
+    local_image.insert(conn).context("Failed to cache remote image")
 }
 
 /// Generates encryption keys for a new workspace, inserts it, and returns the full record.
