@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use rusqlite::Connection;
 use serde::Serialize;
 use shared::{SelectNotesParams, SentNotes};
 use tokio::{sync::Mutex, time::Duration};
@@ -101,6 +102,48 @@ fn emit<S: Serialize + Clone>(handle: &AppHandle, event: &str, payload: S) {
     }
 }
 
+/// Result of merging one server note into the local database.
+enum MergeOutcome {
+    Stored,
+    Unchanged,
+    Conflict(db::schema::Note),
+}
+
+/// Merges a note received from the server into `workspace_id`.
+///
+/// The lookup is workspace-scoped: the same uuid may legitimately exist in another
+/// workspace on this installation and must not shadow this workspace's row.
+fn merge_received_note(
+    conn: &Connection,
+    workspace_id: u32,
+    note: shared::Note,
+) -> Result<MergeOutcome> {
+    let mut note = db::schema::Note::from(note);
+    note.id_workspace = Some(workspace_id);
+
+    match Note::select(conn, note.uuid.clone(), workspace_id)
+        .context("Failed to look up note in database")?
+    {
+        Some(local) => {
+            if note.updated_at > local.updated_at {
+                match local.synched {
+                    true => {
+                        note.update(conn).context("Failed to update received note")?;
+                        Ok(MergeOutcome::Stored)
+                    }
+                    false => Ok(MergeOutcome::Conflict(note)),
+                }
+            } else {
+                Ok(MergeOutcome::Unchanged)
+            }
+        }
+        None => {
+            note.insert(conn).context("Failed to insert received note")?;
+            Ok(MergeOutcome::Stored)
+        }
+    }
+}
+
 /// Fetches notes updated after `last_seen` from the server, stores them locally,
 /// and emits `new_note_metadata`. Returns the highest `server_received_at` among received notes.
 pub async fn receive_latest_notes(
@@ -130,24 +173,14 @@ pub async fn receive_latest_notes(
     for note in notes {
         debug!("note received: {}, {}", note.uuid, note.updated_at);
 
-        let mut note = db::schema::Note::from(note);
-        note.id_workspace = Some(workspace.id);
+        match merge_received_note(&conn, workspace.id, note)? {
+            MergeOutcome::Stored | MergeOutcome::Unchanged => {}
+            MergeOutcome::Conflict(note) => {
+                info!("Note {:?} is in conflict (client side)", note.uuid);
 
-        match Note::select(&conn, note.uuid.clone()).context("Failed to look up note in database")? {
-            Some(sn) => {
-                if note.updated_at > sn.updated_at {
-                    match sn.synched {
-                        true => note.update(&conn).context("Failed to update received note")?,
-                        false => {
-                            info!("Note {:?} is in conflict (client side)", note.uuid);
-
-                            let decrypted_note = decrypt_note_for_emit(&note, &workspace)?;
-                            emit(handle, "conflict", decrypted_note);
-                        }
-                    }
-                }
+                let decrypted_note = decrypt_note_for_emit(&note, &workspace)?;
+                emit(handle, "conflict", decrypted_note);
             }
-            None => note.insert(&conn).context("Failed to insert received note")?,
         }
     }
 
@@ -209,7 +242,7 @@ pub async fn send_latest_notes(
         for result in results {
             match result.status {
                 shared::NoteStatus::Ok(server_received_at) => {
-                    let mut note = Note::select(&conn, result.uuid.clone())
+                    let mut note = Note::select(&conn, result.uuid.clone(), workspace.id)
                         .context("Failed to find sent note in database")?
                         .ok_or_else(|| anyhow::anyhow!("Sent note '{}' not found", result.uuid))?;
                     note.synched = true;
@@ -279,4 +312,130 @@ fn decrypt_note_for_emit(note: &Note, workspace: &Workspace) -> Result<commands:
     };
 
     Ok(commands::NoteResponse::from(note_data))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn open_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        Note::create(&conn).unwrap();
+        Workspace::create(&conn).unwrap();
+
+        for id in [1u32, 2u32] {
+            conn.execute(
+                "INSERT INTO workspace (id, workspace_name, last_sync_at) VALUES (?, ?, 0)",
+                (id, format!("ws{id}")),
+            )
+            .unwrap();
+        }
+
+        conn
+    }
+
+    fn local_note(workspace_id: u32, uuid: &str) -> Note {
+        Note {
+            uuid: uuid.to_string(),
+            id_workspace: Some(workspace_id),
+            content: vec![1, 2, 3],
+            nonce: vec![4, 5, 6],
+            metadata: vec![7, 8, 9],
+            metadata_nonce: vec![10, 11, 12],
+            updated_at: 100,
+            synched: true,
+            deleted: false,
+        }
+    }
+
+    fn shared_note(uuid: &str, updated_at: i64) -> shared::Note {
+        shared::Note {
+            uuid: uuid.to_string(),
+            content: vec![9, 8, 7],
+            nonce: vec![6, 5, 4],
+            metadata: vec![3, 2, 1],
+            metadata_nonce: vec![0],
+            updated_at,
+            server_received_at: 0,
+            deleted: false,
+        }
+    }
+
+    #[test]
+    fn merge_received_note_inserts_when_uuid_exists_in_another_workspace() {
+        let conn = open_db();
+
+        // The uuid already exists locally, but in workspace 1.
+        local_note(1, "shared-uuid").insert(&conn).unwrap();
+
+        let incoming = shared_note("shared-uuid", 100);
+        let outcome = merge_received_note(&conn, 2, incoming).unwrap();
+
+        assert!(matches!(outcome, MergeOutcome::Stored));
+
+        let ws2 = Note::select(&conn, "shared-uuid".to_string(), 2).unwrap().unwrap();
+        assert_eq!(ws2.content, vec![9, 8, 7]);
+        assert_eq!(ws2.id_workspace, Some(2));
+        assert!(ws2.synched);
+
+        let ws1 = Note::select(&conn, "shared-uuid".to_string(), 1).unwrap().unwrap();
+        assert_eq!(ws1.content, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn merge_received_note_updates_synced_local_note_when_server_newer() {
+        let conn = open_db();
+
+        local_note(1, "n1").insert(&conn).unwrap();
+
+        let incoming = shared_note("n1", 200);
+        assert!(matches!(
+            merge_received_note(&conn, 1, incoming).unwrap(),
+            MergeOutcome::Stored
+        ));
+
+        let fetched = Note::select(&conn, "n1".to_string(), 1).unwrap().unwrap();
+        assert_eq!(fetched.content, vec![9, 8, 7]);
+        assert_eq!(fetched.updated_at, 200);
+    }
+
+    #[test]
+    fn merge_received_note_reports_conflict_when_local_unsynced_and_server_newer() {
+        let conn = open_db();
+
+        let mut local = local_note(1, "n1");
+        local.synched = false;
+        local.content = vec![1, 1, 1];
+        local.insert(&conn).unwrap();
+
+        let incoming = shared_note("n1", 200);
+        match merge_received_note(&conn, 1, incoming).unwrap() {
+            MergeOutcome::Conflict(note) => assert_eq!(note.content, vec![9, 8, 7]),
+            _ => panic!("expected a conflict outcome"),
+        }
+
+        let fetched = Note::select(&conn, "n1".to_string(), 1).unwrap().unwrap();
+        assert_eq!(fetched.content, vec![1, 1, 1]);
+        assert_eq!(fetched.updated_at, 100);
+    }
+
+    #[test]
+    fn merge_received_note_ignores_older_or_equal_server_note() {
+        let conn = open_db();
+
+        local_note(1, "n1").insert(&conn).unwrap();
+
+        assert!(matches!(
+            merge_received_note(&conn, 1, shared_note("n1", 100)).unwrap(),
+            MergeOutcome::Unchanged
+        ));
+        assert!(matches!(
+            merge_received_note(&conn, 1, shared_note("n1", 99)).unwrap(),
+            MergeOutcome::Unchanged
+        ));
+
+        let fetched = Note::select(&conn, "n1".to_string(), 1).unwrap().unwrap();
+        assert_eq!(fetched.content, vec![1, 2, 3]);
+        assert_eq!(fetched.updated_at, 100);
+    }
 }

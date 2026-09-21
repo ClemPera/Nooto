@@ -237,7 +237,12 @@ pub async fn get_note(
         .clone()
         .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
 
-    let note = db::operations::get_note(&conn, uuid.to_string(), workspace.master_encryption_key)?;
+    let note = db::operations::get_note(
+        &conn,
+        uuid.to_string(),
+        workspace.id,
+        workspace.master_encryption_key,
+    )?;
 
     Workspace::update_latest_note(&conn, workspace.id, Some(&note.id))?;
 
@@ -258,7 +263,7 @@ pub async fn edit_note(
         .clone()
         .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
 
-    db::operations::update_note(&conn, note, workspace.master_encryption_key)?;
+    db::operations::update_note(&conn, note, workspace.id, workspace.master_encryption_key)?;
 
     Ok(())
 }
@@ -439,14 +444,21 @@ pub async fn sync_login(
 
         notes
             .into_iter()
-            .map(|n| db::operations::get_note(&conn, n.uuid, workspace.master_encryption_key))
+            .map(|n| {
+                db::operations::get_note(
+                    &conn,
+                    n.uuid,
+                    workspace.id,
+                    workspace.master_encryption_key,
+                )
+            })
             .collect::<anyhow::Result<Vec<_>>>()?
     };
 
     if !notes.is_empty() {
         let conn = state.database.lock().await;
         for note in notes {
-            db::operations::update_note(&conn, note, mek)?;
+            db::operations::update_note(&conn, note, workspace.id, mek)?;
         }
     }
 
@@ -534,11 +546,12 @@ pub async fn delete_note(
         .clone()
         .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
 
-    let mut note = db::operations::get_note(&conn, id, workspace.master_encryption_key)?;
+    let mut note =
+        db::operations::get_note(&conn, id, workspace.id, workspace.master_encryption_key)?;
 
     note.deleted = true;
 
-    db::operations::update_note(&conn, note, workspace.master_encryption_key)?;
+    db::operations::update_note(&conn, note, workspace.id, workspace.master_encryption_key)?;
 
     Workspace::update_latest_note(&conn, workspace.id, None)?;
 
@@ -559,11 +572,12 @@ pub async fn restore_note(
         .clone()
         .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
 
-    let mut note = db::operations::get_note(&conn, id, workspace.master_encryption_key)?;
+    let mut note =
+        db::operations::get_note(&conn, id, workspace.id, workspace.master_encryption_key)?;
 
     note.deleted = false;
 
-    db::operations::update_note(&conn, note, workspace.master_encryption_key)?;
+    db::operations::update_note(&conn, note, workspace.id, workspace.master_encryption_key)?;
 
     Ok(())
 }
@@ -607,7 +621,7 @@ pub async fn handle_conflict(
         true => {
             let mut note = {
                 let conn = state.database.lock().await;
-                let mut note = Note::select(&conn, id)
+                let mut note = Note::select(&conn, id, workspace.id)
                     .context("Failed to find note")?
                     .ok_or_else(|| CommandError::not_found("Note not found"))?;
 
@@ -680,8 +694,16 @@ pub async fn handle_conflict(
             {
                 let conn = state.database.lock().await;
 
-                let note = db::schema::Note::from(note);
-                note.update(&conn).context("Failed to save server note locally")?;
+                let mut note = db::schema::Note::from(note);
+                note.id_workspace = Some(workspace.id);
+
+                // Upsert so a missing local row is inserted instead of silently ignored.
+                match Note::select(&conn, note.uuid.clone(), workspace.id)
+                    .context("Failed to find note")?
+                {
+                    Some(_) => note.update(&conn).context("Failed to save server note locally")?,
+                    None => note.insert(&conn).context("Failed to save server note locally")?,
+                }
 
                 let all_notes = db::operations::get_notes(&conn, workspace.id)?;
 

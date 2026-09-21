@@ -54,7 +54,7 @@ impl Note {
     pub fn create(conn: &Connection) -> Result<()> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS note (
-                uuid BLOB PRIMARY KEY,
+                uuid BLOB NOT NULL,
                 id_workspace INTEGER NOT NULL REFERENCES workspace(id),
                 content BLOB,
                 nonce BLOB,
@@ -62,7 +62,8 @@ impl Note {
                 metadata_nonce BLOB,
                 updated_at INTEGER,
                 synched INTEGER NOT NULL,
-                deleted INTEGER NOT NULL
+                deleted INTEGER NOT NULL,
+                PRIMARY KEY (uuid, id_workspace)
             )",
             (),
         )
@@ -71,11 +72,80 @@ impl Note {
         Ok(())
     }
 
-    /// Fetches a note by UUID. Returns `None` if not found.
-    pub fn select(conn: &Connection, uuid: String) -> Result<Option<Self>> {
+    /// Rebuilds a legacy `note` table whose primary key is `uuid` alone so it
+    /// becomes `(uuid, id_workspace)`. No-op when the table is absent or already
+    /// workspace-scoped.
+    pub fn migrate_legacy_primary_key(conn: &Connection) -> Result<()> {
+        let pk_columns: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT name FROM pragma_table_info('note') WHERE pk > 0 ORDER BY pk")
+                .context("Failed to inspect note table schema")?;
+
+            stmt.query_map([], |row| row.get(0))
+                .context("Failed to query note primary key")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to read note primary key columns")?
+        };
+
+        if pk_columns.len() != 1 || pk_columns[0] != "uuid" {
+            return Ok(());
+        }
+
+        conn.execute("PRAGMA foreign_keys = OFF", [])
+            .context("Failed to disable foreign keys for note migration")?;
+
+        let result = (|| -> Result<()> {
+            let tx = conn
+                .unchecked_transaction()
+                .context("Failed to start note migration transaction")?;
+
+            tx.execute_batch(
+                "DROP TABLE IF EXISTS note_migrated;
+                CREATE TABLE note_migrated (
+                    uuid BLOB NOT NULL,
+                    id_workspace INTEGER NOT NULL REFERENCES workspace(id),
+                    content BLOB,
+                    nonce BLOB,
+                    metadata BLOB,
+                    metadata_nonce BLOB,
+                    updated_at INTEGER,
+                    synched INTEGER NOT NULL,
+                    deleted INTEGER NOT NULL,
+                    PRIMARY KEY (uuid, id_workspace)
+                );
+                INSERT INTO note_migrated (uuid, id_workspace, content, nonce, metadata, metadata_nonce, updated_at, synched, deleted)
+                    SELECT uuid, id_workspace, content, nonce, metadata, metadata_nonce, updated_at, synched, deleted FROM note;
+                DROP TABLE note;
+                ALTER TABLE note_migrated RENAME TO note;",
+            )
+            .context("Failed to rebuild note table with composite primary key")?;
+
+            tx.commit()
+                .context("Failed to commit note migration transaction")?;
+
+            Ok(())
+        })();
+
+        // Always restore the pragma, even when the rebuild failed.
+        conn.execute("PRAGMA foreign_keys = ON", [])
+            .context("Failed to re-enable foreign keys after note migration")?;
+
+        result.context("Failed to migrate note primary key")?;
+
+        // Notes silently dropped while the old schema was live cannot be recovered
+        // by an incremental pull, so force a full re-sync. Receiving is an upsert,
+        // re-fetching everything is harmless.
+        conn.execute("UPDATE workspace SET last_sync_at = ?", (i64::MIN,))
+            .context("Failed to reset workspace sync timestamp after note migration")?;
+
+        Ok(())
+    }
+
+    /// Fetches a note by UUID within `id_workspace`. Returns `None` if not found.
+    pub fn select(conn: &Connection, uuid: String, id_workspace: u32) -> Result<Option<Self>> {
         let note = match conn.query_one(
-            "SELECT * FROM note WHERE uuid = ?",
-            (uuid,),
+            "SELECT * FROM note WHERE uuid = ? AND id_workspace = ?",
+            (uuid, id_workspace),
             |row| {
                 Ok(Note {
                     uuid: row.get(0)?,
@@ -110,9 +180,11 @@ impl Note {
 
     /// Updates the note's encrypted content, metadata, timestamps, and sync flag.
     pub fn update(&self, conn: &Connection) -> Result<()> {
+        let id_workspace = self.id_workspace.context("Note has no workspace")?;
+
         conn.execute(
-            "UPDATE note SET content = ?, nonce = ?, metadata = ?, metadata_nonce = ?, updated_at = ?, synched = ?, deleted = ? WHERE uuid = ?",
-            (&self.content, &self.nonce, &self.metadata, &self.metadata_nonce, &self.updated_at, &self.synched, &self.deleted, &self.uuid),
+            "UPDATE note SET content = ?, nonce = ?, metadata = ?, metadata_nonce = ?, updated_at = ?, synched = ?, deleted = ? WHERE uuid = ? AND id_workspace = ?",
+            (&self.content, &self.nonce, &self.metadata, &self.metadata_nonce, &self.updated_at, &self.synched, &self.deleted, &self.uuid, id_workspace),
         )
         .context("Failed to update note")?;
 
@@ -522,7 +594,7 @@ mod tests {
         let note = sample_note(ws_id);
         note.insert(&conn).unwrap();
 
-        let fetched = Note::select(&conn, note.uuid.clone()).unwrap().unwrap();
+        let fetched = Note::select(&conn, note.uuid.clone(), ws_id).unwrap().unwrap();
         assert_eq!(fetched.uuid, note.uuid);
         assert_eq!(fetched.content, note.content);
         assert_eq!(fetched.nonce, note.nonce);
@@ -534,8 +606,111 @@ mod tests {
     #[test]
     fn note_select_missing_returns_none() {
         let conn = open_db();
-        let result = Note::select(&conn, "nonexistent".to_string()).unwrap();
+        let result = Note::select(&conn, "nonexistent".to_string(), 1).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn note_same_uuid_in_two_workspaces_is_allowed_and_isolated() {
+        let conn = open_db();
+        let ws1 = sample_workspace("ws1");
+        ws1.insert(&conn).unwrap();
+        let ws1_id = conn.last_insert_rowid() as u32;
+
+        let ws2 = sample_workspace("ws2");
+        ws2.insert(&conn).unwrap();
+        let ws2_id = conn.last_insert_rowid() as u32;
+
+        let mut note1 = sample_note(ws1_id);
+        note1.uuid = "shared-uuid".to_string();
+        note1.insert(&conn).unwrap();
+
+        let mut note2 = sample_note(ws2_id);
+        note2.uuid = "shared-uuid".to_string();
+        note2.content = vec![7, 7, 7];
+        note2.insert(&conn).unwrap();
+
+        let mut updated1 = Note::select(&conn, "shared-uuid".to_string(), ws1_id)
+            .unwrap()
+            .unwrap();
+        updated1.content = vec![9, 9, 9];
+        updated1.update(&conn).unwrap();
+
+        let fetched1 = Note::select(&conn, "shared-uuid".to_string(), ws1_id).unwrap().unwrap();
+        let fetched2 = Note::select(&conn, "shared-uuid".to_string(), ws2_id).unwrap().unwrap();
+
+        assert_eq!(fetched1.content, vec![9, 9, 9]);
+        assert_eq!(fetched2.content, vec![7, 7, 7]);
+        assert_eq!(fetched2.id_workspace, Some(ws2_id));
+    }
+
+    #[test]
+    fn note_migrate_legacy_uuid_primary_key() {
+        let conn = Connection::open_in_memory().unwrap();
+        Workspace::create(&conn).unwrap();
+
+        // Manually recreate the legacy table with a uuid-only primary key.
+        conn.execute_batch(
+            "CREATE TABLE note (
+                uuid BLOB PRIMARY KEY,
+                id_workspace INTEGER NOT NULL REFERENCES workspace(id),
+                content BLOB,
+                nonce BLOB,
+                metadata BLOB,
+                metadata_nonce BLOB,
+                updated_at INTEGER,
+                synched INTEGER NOT NULL,
+                deleted INTEGER NOT NULL
+            )",
+        )
+        .unwrap();
+
+        let mut ws1 = sample_workspace("ws1");
+        ws1.last_sync_at = 12345;
+        ws1.insert(&conn).unwrap();
+        let ws1_id = conn.last_insert_rowid() as u32;
+
+        let ws2 = sample_workspace("ws2");
+        ws2.insert(&conn).unwrap();
+        let ws2_id = conn.last_insert_rowid() as u32;
+
+        let mut legacy1 = sample_note(ws1_id);
+        legacy1.uuid = "legacy-1".to_string();
+        legacy1.synched = true;
+        legacy1.insert(&conn).unwrap();
+
+        let mut legacy2 = sample_note(ws2_id);
+        legacy2.uuid = "legacy-2".to_string();
+        legacy2.insert(&conn).unwrap();
+
+        Note::create(&conn).unwrap();
+        Note::migrate_legacy_primary_key(&conn).unwrap();
+
+        let migrated1 = Note::select(&conn, "legacy-1".to_string(), ws1_id).unwrap().unwrap();
+        assert_eq!(migrated1.id_workspace, Some(ws1_id));
+        assert_eq!(migrated1.content, legacy1.content);
+        assert_eq!(migrated1.nonce, legacy1.nonce);
+        assert_eq!(migrated1.metadata, legacy1.metadata);
+        assert_eq!(migrated1.metadata_nonce, legacy1.metadata_nonce);
+        assert_eq!(migrated1.updated_at, legacy1.updated_at);
+        assert_eq!(migrated1.synched, legacy1.synched);
+        assert_eq!(migrated1.deleted, legacy1.deleted);
+
+        let migrated2 = Note::select(&conn, "legacy-2".to_string(), ws2_id).unwrap().unwrap();
+        assert_eq!(migrated2.id_workspace, Some(ws2_id));
+
+        // The composite primary key is active: the same uuid can now live in another workspace.
+        let mut same_uuid = sample_note(ws2_id);
+        same_uuid.uuid = "legacy-1".to_string();
+        same_uuid.insert(&conn).unwrap();
+
+        // A full re-sync is forced so notes dropped by the bug are re-fetched.
+        let ws1_after = Workspace::select(&conn, "ws1".to_string()).unwrap().unwrap();
+        assert_eq!(ws1_after.last_sync_at, i64::MIN);
+
+        // Running the migration again is a no-op.
+        Note::migrate_legacy_primary_key(&conn).unwrap();
+        assert_eq!(Note::select_all(&conn, ws2_id).unwrap().len(), 2);
     }
 
     #[test]
@@ -552,7 +727,7 @@ mod tests {
         note.synched = true;
         note.update(&conn).unwrap();
 
-        let fetched = Note::select(&conn, note.uuid.clone()).unwrap().unwrap();
+        let fetched = Note::select(&conn, note.uuid.clone(), ws_id).unwrap().unwrap();
         assert_eq!(fetched.content, vec![99, 88, 77]);
         assert!(fetched.synched);
     }

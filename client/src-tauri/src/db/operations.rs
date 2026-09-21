@@ -52,11 +52,16 @@ pub fn create_note(
     Ok(note.uuid)
 }
 
-/// Fetches and decrypts a note by UUID, returning plaintext `NoteData`.
-pub fn get_note(conn: &Connection, uuid: String, mek: Key<Aes256Gcm>) -> Result<NoteData> {
+/// Fetches and decrypts a note by UUID within `id_workspace`, returning plaintext `NoteData`.
+pub fn get_note(
+    conn: &Connection,
+    uuid: String,
+    id_workspace: u32,
+    mek: Key<Aes256Gcm>,
+) -> Result<NoteData> {
     trace!("getting note {uuid}");
 
-    let note = Note::select(conn, uuid.clone())
+    let note = Note::select(conn, uuid.clone(), id_workspace)
         .context("Failed to read note from database")?
         .ok_or_else(|| anyhow::anyhow!("Note '{}' not found", uuid))?;
 
@@ -88,8 +93,13 @@ pub fn get_notes(conn: &Connection, id_workspace: u32) -> Result<Vec<Note>> {
     Note::select_all(conn, id_workspace).context("Failed to read notes from database")
 }
 
-/// Re-encrypts and saves updated note data. Marks the note as unsynced.
-pub fn update_note(conn: &Connection, note_data: NoteData, mek: Key<Aes256Gcm>) -> Result<()> {
+/// Re-encrypts and saves updated note data for `id_workspace`. Marks the note as unsynced.
+pub fn update_note(
+    conn: &Connection,
+    note_data: NoteData,
+    id_workspace: u32,
+    mek: Key<Aes256Gcm>,
+) -> Result<()> {
     let (content, nonce) = crypt::encrypt_data(note_data.content.as_bytes(), &mek)
         .context("Failed to encrypt note content")?;
 
@@ -105,7 +115,7 @@ pub fn update_note(conn: &Connection, note_data: NoteData, mek: Key<Aes256Gcm>) 
     let (metadata, metadata_nonce) =
         crypt::encrypt_data(&metadata_ser, &mek).context("Failed to encrypt note metadata")?;
 
-    let mut note = Note::select(conn, note_data.id.clone())
+    let mut note = Note::select(conn, note_data.id.clone(), id_workspace)
         .context("Failed to read note from database")?
         .ok_or_else(|| anyhow::anyhow!("Note '{}' not found", note_data.id))?;
 

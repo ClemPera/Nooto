@@ -22,6 +22,8 @@ pub fn init(db_path: PathBuf) -> Result<Mutex<Connection>> {
     schema::Note::create(&conn)?;
     schema::Workspace::create(&conn)?;
     schema::Common::create(&conn)?;
+    // Rebuild legacy note tables whose primary key wasn't workspace-scoped.
+    schema::Note::migrate_legacy_primary_key(&conn)?;
     trace!("Tables have been created correctly");
 
     Ok(Mutex::new(conn))
