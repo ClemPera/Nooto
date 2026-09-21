@@ -81,6 +81,7 @@ jobs:
         run: npm install
 
       - uses: tauri-apps/tauri-action@v0
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -105,6 +106,7 @@ jobs:
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
       - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           draft: true
           files: ${{ env.ARCHIVE }}
@@ -130,6 +132,14 @@ jobs:
 
       - uses: android-actions/setup-android@v4
 
+      - name: Align SDK path with the F-Droid buildserver
+        run: |
+          sudo ln -sfn "$ANDROID_HOME" /opt/android-sdk
+          sudo mkdir -p /cargo
+          sudo chown "$USER" /cargo
+          echo "ANDROID_HOME=/opt/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/opt/android-sdk" >> "$GITHUB_ENV"
+
       - name: Install Android NDK
         run: |
           sdkmanager "ndk;27.0.12077973"
@@ -145,15 +155,16 @@ jobs:
           done
           echo "$NDK_BIN" >> $GITHUB_PATH
 
+      - name: Compute SOURCE_DATE_EPOCH
+        run: |
+          epoch=$(git log -1 --format=%ct)
+          echo "SOURCE_DATE_EPOCH=$epoch" >> "$GITHUB_ENV"
+          echo "Using SOURCE_DATE_EPOCH=$epoch"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.0
           targets: aarch64-linux-android
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: '. -> target'
-          prefix-key: client
 
       - name: Install frontend dependencies
         working-directory: client
@@ -172,6 +183,8 @@ jobs:
         working-directory: client
         env:
           NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+          CARGO_HOME: /cargo
+          CARGO_TARGET_DIR: /tmp/build
         run: |
           export RUSTFLAGS="--remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$PWD=/build"
           npm run tauri android build -- --apk --split-per-abi --target aarch64
@@ -181,7 +194,15 @@ jobs:
           find client/src-tauri/gen/android -name "*.apk" | tee apk-paths.txt
           echo "APK_FILES=$(cat apk-paths.txt | tr '\n' ',' | sed 's/,$//')" >> "$GITHUB_ENV"
 
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nooto-android-arm64
+          path: client/src-tauri/gen/android/app/build/outputs/apk/arm64/release/*.apk
+          if-no-files-found: error
+
       - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           tag_name: ${{ github.ref_name }}
           name: 'Nooto ${{ github.ref_name }}'
