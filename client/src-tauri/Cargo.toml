@@ -32,7 +32,7 @@ argon2 = { version = "0.5", features = ["std"] }
 aes-gcm = "0.10"
 chrono = { version="0.4", features = ["serde"] }
 bip39 = { version="2.2", features = ["rand"] }
-reqwest = { version = "0.13", features = ["json", "blocking", "rustls", "query"] }
+reqwest = { version = "0.13", features = ["json", "blocking", "native-tls-vendored", "query"] }
 anyhow = "1.0"
 tokio = "1.48"
 hex = "0.4"
