@@ -1,0 +1,1 @@
+ALTER TABLE `user` ADD COLUMN `password_hash_version` TINYINT UNSIGNED NOT NULL DEFAULT 1;

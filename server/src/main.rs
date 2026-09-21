@@ -1,10 +1,16 @@
 use std::env;
+use std::net::SocketAddr;
+use std::sync::Arc;
 
 use anyhow::Context;
+use argon2::{
+    Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+};
 use axum::{
     Json, Router,
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode, header::AUTHORIZATION},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -12,6 +18,8 @@ use dotenv::dotenv;
 use mysql_async::{Conn, Pool};
 use rand::{TryRng, rngs::SysRng};
 use shared::SentNotesResult;
+use subtle::ConstantTimeEq;
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor};
 
 use crate::schema::User;
 
@@ -104,33 +112,123 @@ async fn main() -> anyhow::Result<()> {
 
     drop(conn);
 
-    let app = Router::new()
-        .route("/notes", post(send_notes))
-        .route("/notes", get(select_notes))
-        .route("/note", get(select_note))
+    rehash_legacy_password_hashes(&pool)
+        .await
+        .context("Failed to rehash legacy password hashes")?;
+
+    // Rate-limited below: /login and /create_account are what an attacker would brute-force.
+    let auth_governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .key_extractor(SmartIpKeyExtractor)
+            .per_second(4)
+            .burst_size(5)
+            .finish()
+            .context("Failed to build rate limiter config")?,
+    );
+
+    let auth_routes = Router::new()
         .route("/create_account", post(insert_user))
         // .route("/user", put()) //Update user
         .route("/login", get(login_request))
         .route("/login", post(login))
+        .route("/logout", post(logout))
         // .route("/user_recovery", get()) //Request recovery stuff
         // .route("/user_recovery", post()) //check recovery hash
         // .route("/data_recovery", get()) //Request recovery stuff
         // .route("/data_recovery", post()) //store new recovery stuff
+        .route_layer(GovernorLayer { config: auth_governor_conf });
+
+    let app = Router::new()
+        .route("/notes", post(send_notes))
+        .route("/notes", get(select_notes))
+        .route("/note", get(select_note))
+        .merge(auth_routes)
         .with_state(pool);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
         .expect("Failed to bind TCP listener");
 
-    axum::serve(listener, app)
-        .await
-        .expect("Server error");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("Server error");
 
     Ok(())
 }
 
-/// Verifies that `token` matches one of the stored tokens for `username`.
-/// Returns `Forbidden` if no token matches, or `Unprocessable` if the user doesn't exist.
+/// Password hash format; see schema::User::password_hash_version.
+const CURRENT_PASSWORD_HASH_VERSION: u8 = 2;
+
+/// Re-hashes login_hash with a fresh salt (defense in depth against a DB leak).
+fn harden_login_hash(login_hash: &str) -> anyhow::Result<String> {
+    let salt = SaltString::generate(&mut OsRng);
+    Argon2::default()
+        .hash_password(login_hash.as_bytes(), &salt)
+        .map(|hash| hash.to_string())
+        .map_err(|e| anyhow::anyhow!("Failed to hash login_hash: {e}"))
+}
+
+/// Verifies login_hash against a hardened (Argon2id) stored_password_hash.
+fn verify_login_hash(login_hash: &str, stored_password_hash: &str) -> Result<bool, AppError> {
+    let parsed = PasswordHash::new(stored_password_hash).map_err(|e| {
+        AppError::internal(anyhow::anyhow!("Failed to parse stored password hash: {e}"))
+    })?;
+
+    Ok(Argon2::default()
+        .verify_password(login_hash.as_bytes(), &parsed)
+        .is_ok())
+}
+
+/// One-time migration: rehashes accounts below CURRENT_PASSWORD_HASH_VERSION, then becomes a no-op.
+//TODO: remove this fn, password_hash_version, and its write in insert_user() once no account is below version 2.
+async fn rehash_legacy_password_hashes(pool: &Pool) -> anyhow::Result<()> {
+    let mut conn = pool.get_conn().await.context("Failed to get DB connection")?;
+
+    let legacy_users =
+        schema::User::select_outdated_password_hashes(&mut conn, CURRENT_PASSWORD_HASH_VERSION).await?;
+
+    if legacy_users.is_empty() {
+        println!("Password hash migration: no legacy accounts to rehash");
+        return Ok(());
+    }
+
+    let total = legacy_users.len();
+    let mut migrated = 0;
+
+    for user in legacy_users {
+        let Some(user_id) = user.id else { continue };
+
+        let hardened = harden_login_hash(&user.stored_password_hash)?;
+        schema::User::update_password_hash(&mut conn, user_id, &hardened, CURRENT_PASSWORD_HASH_VERSION).await?;
+        migrated += 1;
+    }
+
+    println!("Password hash migration: rehashed {migrated}/{total} legacy accounts");
+
+    Ok(())
+}
+
+/// Extracts and hex-decodes a bearer token from the `Authorization` header.
+fn bearer_token_from_headers(headers: &HeaderMap) -> Result<Vec<u8>, AppError> {
+    let value = headers
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| AppError::unauthorized("Missing or malformed Authorization header"))?;
+
+    hex::decode(value).map_err(|_| AppError::bad_request("Invalid token format"))
+}
+
+/// A token is rejected once it's been idle (unused) for longer than this.
+const SESSION_TOKEN_MAX_AGE_SECS: i64 = 60 * 60 * 24 * 30;
+
+/// Minimum gap between DB writes that refresh a token's age.
+const SESSION_TOKEN_REFRESH_AFTER_SECS: i64 = 60 * 60 * 24;
+
+/// Verifies `token` is valid and not idle-expired for `username`.
 async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Result<(), AppError> {
     //TODO: this could return user honestly
     let user = schema::User::select(conn, username)
@@ -144,8 +242,25 @@ async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Resul
         .await
         .map_err(AppError::from)?;
 
+    let now = chrono::Local::now().to_utc().timestamp();
+
     for ut in user_tokens {
-        if ut.token == token {
+        if bool::from(ut.token.ct_eq(&token)) {
+            let idle_secs = now - ut.last_used_at;
+
+            if idle_secs > SESSION_TOKEN_MAX_AGE_SECS {
+                schema::UserToken::delete(conn, user_id, &ut.token)
+                    .await
+                    .map_err(AppError::from)?;
+                return Err(AppError::unauthorized("Session expired, please log in again"));
+            }
+
+            if idle_secs > SESSION_TOKEN_REFRESH_AFTER_SECS {
+                schema::UserToken::touch(conn, user_id, &ut.token, now)
+                    .await
+                    .map_err(AppError::from)?;
+            }
+
             return Ok(());
         }
     }
@@ -196,7 +311,7 @@ async fn send_notes(
                     let mut updated_note: schema::Note = note.into();
                     updated_note.id_user = Some(user_id);
                     updated_note.server_received_at = chrono::Local::now().to_utc().timestamp();
-                    updated_note.update(&mut conn).await.map_err(AppError::from)?;
+                    updated_note.update(&mut conn, user_id).await.map_err(AppError::from)?;
 
                     result.push(SentNotesResult {
                         uuid: updated_note.uuid,
@@ -225,6 +340,7 @@ async fn send_notes(
 /// `GET /notes` — returns all notes for the authenticated user updated after `params.updated_at`.
 async fn select_notes(
     State(pool): State<Pool>,
+    headers: HeaderMap,
     Query(params): Query<shared::SelectNotesParams>,
 ) -> Result<Json<Vec<shared::Note>>, AppError> {
     let mut conn = pool
@@ -232,8 +348,7 @@ async fn select_notes(
         .await
         .context("Failed to get DB connection")?;
 
-    let token = hex::decode(&params.token)
-        .map_err(|_| AppError::bad_request("Invalid token format"))?;
+    let token = bearer_token_from_headers(&headers)?;
 
     user_verify(&mut conn, params.username.clone(), token).await?;
 
@@ -260,6 +375,7 @@ async fn select_notes(
 /// `GET /note` — returns a single note by UUID for the authenticated user.
 async fn select_note(
     State(pool): State<Pool>,
+    headers: HeaderMap,
     Query(params): Query<shared::SelectNoteParams>,
 ) -> Result<Json<shared::Note>, AppError> {
     let mut conn = pool
@@ -267,8 +383,7 @@ async fn select_note(
         .await
         .context("Failed to get DB connection")?;
 
-    let token = hex::decode(&params.token)
-        .map_err(|_| AppError::bad_request("Invalid token format"))?;
+    let token = bearer_token_from_headers(&headers)?;
 
     user_verify(&mut conn, params.username.clone(), token).await?;
 
@@ -293,7 +408,9 @@ async fn insert_user(
     Json(user): Json<shared::User>,
 ) -> Result<(), AppError> {
     println!("received insert_user");
-    let user: schema::User = user.into();
+    let mut user: schema::User = user.into();
+    user.stored_password_hash = harden_login_hash(&user.stored_password_hash)?;
+    user.password_hash_version = CURRENT_PASSWORD_HASH_VERSION;
 
     let mut conn = pool
         .get_conn()
@@ -346,24 +463,26 @@ async fn login(
 
     let user = schema::User::select(&mut conn, params.username)
         .await
-        .map_err(AppError::from)?
-        .ok_or_else(||AppError::not_found("User doesn't exist"))?;
+        .map_err(AppError::from)?;
 
-    if params.login_hash != user.stored_password_hash {
-        return Err(AppError::unauthorized("Wrong password"));
-    }
+    // Same response for missing user and wrong password to avoid enumeration (CWE-203).
+    let user = match user {
+        Some(user) if verify_login_hash(&params.login_hash, &user.stored_password_hash)? => user,
+        _ => return Err(AppError::unauthorized("Invalid username or password")),
+    };
+
+    let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
 
     let mut token = vec![0u8; 32];
     SysRng
         .try_fill_bytes(&mut token)
         .map_err(|e| AppError::internal(anyhow::anyhow!("Failed to generate token: {e}")))?;
 
-    let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
-
     let user_token = schema::UserToken {
         id: None,
         id_user: user_id,
         token,
+        last_used_at: chrono::Local::now().to_utc().timestamp(),
     };
 
     user_token.insert(&mut conn).await.map_err(AppError::from)?;
@@ -374,6 +493,32 @@ async fn login(
         mek_password_nonce: user.mek_password_nonce,
         token: user_token.token,
     }))
+}
+
+/// `POST /logout` — revokes the presented session token.
+async fn logout(
+    State(pool): State<Pool>,
+    Json(params): Json<shared::LogoutParams>,
+) -> Result<StatusCode, AppError> {
+    let mut conn = pool
+        .get_conn()
+        .await
+        .context("Failed to get DB connection")?;
+
+    user_verify(&mut conn, params.username.clone(), params.token.clone()).await?;
+
+    let user = User::select(&mut conn, params.username)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(AppError::unprocessable)?;
+
+    let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
+
+    schema::UserToken::delete(&mut conn, user_id, &params.token)
+        .await
+        .map_err(AppError::from)?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]
