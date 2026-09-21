@@ -123,6 +123,60 @@
   margin: 1.25rem 0;
 }
 
+/* !important overrides the resize handle's inline px height so shrinking the pane rescales proportionally instead of stretching */
+.note-editor .ProseMirror [data-resize-wrapper] img {
+  max-width: 100%;
+  height: auto !important;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  display: block;
+}
+
+.note-editor .ProseMirror [data-resize-container] {
+  max-width: 100%;
+  margin-bottom: 0.75rem;
+}
+
+.note-editor .ProseMirror [data-resize-container].ProseMirror-selectednode img {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.note-editor .ProseMirror [data-resize-handle] {
+  width: 10px;
+  height: 10px;
+  background: #60a5fa;
+  border: 1px solid #0f172a;
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.note-editor .ProseMirror [data-resize-container]:hover [data-resize-handle],
+.note-editor .ProseMirror [data-resize-container].ProseMirror-selectednode [data-resize-handle] {
+  opacity: 1;
+}
+
+.note-editor .ProseMirror [data-resize-handle="top-left"] {
+  cursor: nwse-resize;
+  transform: translate(-50%, -50%);
+}
+
+.note-editor .ProseMirror [data-resize-handle="bottom-right"] {
+  cursor: nwse-resize;
+  transform: translate(50%, 50%);
+}
+
+.note-editor .ProseMirror [data-resize-handle="top-right"] {
+  cursor: nesw-resize;
+  transform: translate(50%, -50%);
+}
+
+.note-editor .ProseMirror [data-resize-handle="bottom-left"] {
+  cursor: nesw-resize;
+  transform: translate(-50%, 50%);
+}
+
 .note-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;

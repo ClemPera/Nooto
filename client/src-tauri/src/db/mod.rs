@@ -20,6 +20,7 @@ pub fn init(db_path: PathBuf) -> Result<Mutex<Connection>> {
         .context("Failed to enable foreign keys")?;
 
     schema::Note::create(&conn)?;
+    schema::Image::create(&conn)?;
     schema::Workspace::create(&conn)?;
     schema::Common::create(&conn)?;
     trace!("Tables have been created correctly");
