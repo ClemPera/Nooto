@@ -19,9 +19,15 @@ export default function AuthForm({ mode, loading, error, onSubmit, onToggleMode 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   // Dev builds default to the local server so testing doesn't hit the public
-  // production instance; prod builds default to the public server.
+  // production instance; beta builds start blank so testers pick a server
+  // explicitly instead of writing to it by accident; prod builds default to
+  // the public server.
   const [instance, setInstance] = useState(
-    import.meta.env.DEV ? "http://localhost:3000" : "https://nooto.nextmiracle.eu"
+    import.meta.env.DEV
+      ? "http://localhost:3000"
+      : import.meta.env.MODE === "beta"
+        ? ""
+        : "https://nooto.nextmiracle.eu"
   );
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [localError, setLocalError] = useState("");

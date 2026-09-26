@@ -11,14 +11,17 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       prerelease: ${{ steps.check.outputs.prerelease }}
+      config-args: ${{ steps.check.outputs.config-args }}
     steps:
       - name: Detect alpha/beta tags
         id: check
         run: |
           if [[ "${{ github.ref_name }}" =~ -(alpha|beta)[0-9]*$ ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "config-args=--config src-tauri/tauri.beta.conf.json" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "config-args=" >> "$GITHUB_OUTPUT"
           fi
 
   build-desktop:
@@ -106,7 +109,7 @@ jobs:
           releaseDraft: true
           prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
           projectPath: client
-          args: ${{ matrix.tauri-args }}
+          args: ${{ matrix.tauri-args }} ${{ needs.prepare.outputs.config-args }}
 
       - name: Create binary archive
         shell: bash
@@ -204,7 +207,7 @@ jobs:
           CARGO_TARGET_DIR: /tmp/build
         run: |
           export RUSTFLAGS="--remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$PWD=/build"
-          npm run tauri android build -- --apk --split-per-abi --target aarch64
+          npm run tauri android build -- --apk --split-per-abi --target aarch64 ${{ needs.prepare.outputs.config-args }}
 
       - name: Find APK artifacts
         run: |

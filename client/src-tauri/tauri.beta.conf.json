@@ -1,0 +1,7 @@
+{
+  "productName": "Nooto Beta",
+  "identifier": "com.nooto.app.beta",
+  "build": {
+    "beforeBuildCommand": "npm run build -- --mode beta"
+  }
+}
