@@ -7,7 +7,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - name: Detect alpha/beta tags
+        id: check
+        run: |
+          if [[ "${{ github.ref_name }}" =~ -(alpha|beta)[0-9]*$ ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-desktop:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -89,7 +104,7 @@ jobs:
           releaseName: 'Nooto ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download and install this version.'
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
           projectPath: client
           args: ${{ matrix.tauri-args }}
 
@@ -109,12 +124,14 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           draft: true
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
           files: ${{ env.ARCHIVE }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-android:
     name: Build Android
+    needs: prepare
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -208,7 +225,7 @@ jobs:
           name: 'Nooto ${{ github.ref_name }}'
           body: 'See the assets below to download and install this version.'
           draft: true
-          prerelease: false
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
           files: ${{ env.APK_FILES }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
