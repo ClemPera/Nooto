@@ -3,29 +3,25 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
-};
 use axum::{
     Json, Router,
     extract::{Query, State},
-    http::{HeaderMap, StatusCode, header::AUTHORIZATION},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use dotenv::dotenv;
-use mysql_async::{Conn, Pool};
+use mysql_async::Pool;
 use rand::{TryRng, rngs::SysRng};
 use shared::SentNotesResult;
-use subtle::ConstantTimeEq;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor};
 
 use crate::schema::User;
 
+mod utils;
 mod schema;
-
 mod migrations;
+mod constants;
 
 /// Application error returned by all handlers.
 /// Internal errors are logged server-side and return a generic 500 to the client.
@@ -112,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
 
     drop(conn);
 
-    rehash_legacy_password_hashes(&pool)
+    utils::rehash_legacy_password_hashes(&pool)
         .await
         .context("Failed to rehash legacy password hashes")?;
 
@@ -159,114 +155,6 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Password hash format; see schema::User::password_hash_version.
-const CURRENT_PASSWORD_HASH_VERSION: u8 = 2;
-
-/// Re-hashes login_hash with a fresh salt (defense in depth against a DB leak).
-fn harden_login_hash(login_hash: &str) -> anyhow::Result<String> {
-    let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
-        .hash_password(login_hash.as_bytes(), &salt)
-        .map(|hash| hash.to_string())
-        .map_err(|e| anyhow::anyhow!("Failed to hash login_hash: {e}"))
-}
-
-/// Verifies login_hash against a hardened (Argon2id) stored_password_hash.
-fn verify_login_hash(login_hash: &str, stored_password_hash: &str) -> Result<bool, AppError> {
-    let parsed = PasswordHash::new(stored_password_hash).map_err(|e| {
-        AppError::internal(anyhow::anyhow!("Failed to parse stored password hash: {e}"))
-    })?;
-
-    Ok(Argon2::default()
-        .verify_password(login_hash.as_bytes(), &parsed)
-        .is_ok())
-}
-
-/// One-time migration: rehashes accounts below CURRENT_PASSWORD_HASH_VERSION, then becomes a no-op.
-//TODO: remove this fn, password_hash_version, and its write in insert_user() once no account is below version 2.
-async fn rehash_legacy_password_hashes(pool: &Pool) -> anyhow::Result<()> {
-    let mut conn = pool.get_conn().await.context("Failed to get DB connection")?;
-
-    let legacy_users =
-        schema::User::select_outdated_password_hashes(&mut conn, CURRENT_PASSWORD_HASH_VERSION).await?;
-
-    if legacy_users.is_empty() {
-        println!("Password hash migration: no legacy accounts to rehash");
-        return Ok(());
-    }
-
-    let total = legacy_users.len();
-    let mut migrated = 0;
-
-    for user in legacy_users {
-        let Some(user_id) = user.id else { continue };
-
-        let hardened = harden_login_hash(&user.stored_password_hash)?;
-        schema::User::update_password_hash(&mut conn, user_id, &hardened, CURRENT_PASSWORD_HASH_VERSION).await?;
-        migrated += 1;
-    }
-
-    println!("Password hash migration: rehashed {migrated}/{total} legacy accounts");
-
-    Ok(())
-}
-
-/// Extracts and hex-decodes a bearer token from the `Authorization` header.
-fn bearer_token_from_headers(headers: &HeaderMap) -> Result<Vec<u8>, AppError> {
-    let value = headers
-        .get(AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or_else(|| AppError::unauthorized("Missing or malformed Authorization header"))?;
-
-    hex::decode(value).map_err(|_| AppError::bad_request("Invalid token format"))
-}
-
-/// A token is rejected once it's been idle (unused) for longer than this.
-const SESSION_TOKEN_MAX_AGE_SECS: i64 = 60 * 60 * 24 * 30;
-
-/// Minimum gap between DB writes that refresh a token's age.
-const SESSION_TOKEN_REFRESH_AFTER_SECS: i64 = 60 * 60 * 24;
-
-/// Verifies `token` is valid and not idle-expired for `username`.
-async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Result<(), AppError> {
-    //TODO: this could return user honestly
-    let user = schema::User::select(conn, username)
-        .await
-        .map_err(AppError::from)?
-        .ok_or_else(AppError::unprocessable)?;
-
-    let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
-
-    let user_tokens = schema::UserToken::select(conn, user_id)
-        .await
-        .map_err(AppError::from)?;
-
-    let now = chrono::Local::now().to_utc().timestamp();
-
-    for ut in user_tokens {
-        if bool::from(ut.token.ct_eq(&token)) {
-            let idle_secs = now - ut.last_used_at;
-
-            if idle_secs > SESSION_TOKEN_MAX_AGE_SECS {
-                schema::UserToken::delete(conn, user_id, &ut.token)
-                    .await
-                    .map_err(AppError::from)?;
-                return Err(AppError::unauthorized("Session expired, please log in again"));
-            }
-
-            if idle_secs > SESSION_TOKEN_REFRESH_AFTER_SECS {
-                schema::UserToken::touch(conn, user_id, &ut.token, now)
-                    .await
-                    .map_err(AppError::from)?;
-            }
-
-            return Ok(());
-        }
-    }
-
-    Err(AppError::forbidden())
-}
 
 /// `POST /notes` — upserts a batch of notes for the authenticated user.
 /// Returns per-note results; conflicting notes (server newer and `force` is false) are flagged.
@@ -279,7 +167,7 @@ async fn send_notes(
         .await
         .context("Failed to get DB connection")?;
 
-    user_verify(&mut conn, sent_notes.username.clone(), sent_notes.token).await?;
+    utils::user_verify(&mut conn, sent_notes.username.clone(), sent_notes.token).await?;
 
     let user = User::select(&mut conn, sent_notes.username)
         .await
@@ -348,9 +236,9 @@ async fn select_notes(
         .await
         .context("Failed to get DB connection")?;
 
-    let token = bearer_token_from_headers(&headers)?;
+    let token = utils::bearer_token_from_headers(&headers)?;
 
-    user_verify(&mut conn, params.username.clone(), token).await?;
+    utils::user_verify(&mut conn, params.username.clone(), token).await?;
 
     let user = User::select(&mut conn, params.username)
         .await
@@ -383,9 +271,9 @@ async fn select_note(
         .await
         .context("Failed to get DB connection")?;
 
-    let token = bearer_token_from_headers(&headers)?;
+    let token = utils::bearer_token_from_headers(&headers)?;
 
-    user_verify(&mut conn, params.username.clone(), token).await?;
+    utils::user_verify(&mut conn, params.username.clone(), token).await?;
 
     let user = User::select(&mut conn, params.username)
         .await
@@ -409,8 +297,8 @@ async fn insert_user(
 ) -> Result<(), AppError> {
     println!("received insert_user");
     let mut user: schema::User = user.into();
-    user.stored_password_hash = harden_login_hash(&user.stored_password_hash)?;
-    user.password_hash_version = CURRENT_PASSWORD_HASH_VERSION;
+    user.stored_password_hash = utils::harden_login_hash(&user.stored_password_hash)?;
+    user.password_hash_version = constants::CURRENT_PASSWORD_HASH_VERSION;
 
     let mut conn = pool
         .get_conn()
@@ -467,7 +355,7 @@ async fn login(
 
     // Same response for missing user and wrong password to avoid enumeration (CWE-203).
     let user = match user {
-        Some(user) if verify_login_hash(&params.login_hash, &user.stored_password_hash)? => user,
+        Some(user) if utils::verify_login_hash(&params.login_hash, &user.stored_password_hash)? => user,
         _ => return Err(AppError::unauthorized("Invalid username or password")),
     };
 
@@ -505,7 +393,7 @@ async fn logout(
         .await
         .context("Failed to get DB connection")?;
 
-    user_verify(&mut conn, params.username.clone(), params.token.clone()).await?;
+    utils::user_verify(&mut conn, params.username.clone(), params.token.clone()).await?;
 
     let user = User::select(&mut conn, params.username)
         .await
