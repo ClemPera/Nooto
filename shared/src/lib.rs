@@ -32,14 +32,14 @@ pub struct Note {
     pub deleted: bool
 }
 
-/// Query parameters for `GET /notes`; token goes in the Authorization header, not here.
+/// Query parameters for `GET /notes`
 #[derive(Deserialize, Serialize, Debug)]
 pub struct SelectNotesParams {
     pub username: String,
     pub updated_at: i64
 }
 
-/// Query parameters for `GET /note`; token goes in the Authorization header, not here.
+/// Query parameters for `GET /note`
 #[derive(Deserialize, Serialize, Debug)]
 pub struct SelectNoteParams {
     pub username: String,

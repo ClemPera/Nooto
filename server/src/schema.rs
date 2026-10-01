@@ -104,7 +104,6 @@ impl Note {
     }
 
     /// Updates an existing note. Caller must set `server_received_at` before calling.
-    /// id_user prevents cross-account overwrites when two users share a uuid.
     pub async fn update(&self, conn: &mut Conn, id_user: u32) -> Result<()> {
         conn.exec_drop(
             "UPDATE note \
