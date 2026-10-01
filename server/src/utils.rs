@@ -122,6 +122,7 @@ pub fn bearer_token_from_headers(headers: &HeaderMap) -> Result<Vec<u8>, AppErro
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
+        .filter(|v| !v.is_empty())
         .ok_or_else(|| AppError::unauthorized("Missing or malformed Authorization header"))?;
 
     hex::decode(value).map_err(|_| AppError::bad_request("Invalid token format"))
