@@ -127,3 +127,99 @@ pub fn bearer_token_from_headers(headers: &HeaderMap) -> Result<Vec<u8>, AppErro
 
     hex::decode(value).map_err(|_| AppError::bad_request("Invalid token format"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{HeaderValue, StatusCode};
+
+    fn auth_headers(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_str(value).unwrap());
+        headers
+    }
+
+    // --- harden_login_hash ---
+
+    #[test]
+    fn harden_login_hash_produces_argon2id_hash() {
+        let hash = harden_login_hash("hunter2").unwrap();
+        assert!(hash.starts_with("$argon2id$"));
+    }
+
+    #[test]
+    fn harden_login_hash_verifies_against_original() {
+        let hash = harden_login_hash("hunter2").unwrap();
+        assert!(verify_login_hash("hunter2", &hash).unwrap());
+    }
+
+    #[test]
+    fn harden_login_hash_uses_unique_salts() {
+        let first = harden_login_hash("hunter2").unwrap();
+        let second = harden_login_hash("hunter2").unwrap();
+
+        assert_ne!(first, second);
+        assert!(verify_login_hash("hunter2", &first).unwrap());
+        assert!(verify_login_hash("hunter2", &second).unwrap());
+    }
+
+    // --- verify_login_hash ---
+
+    #[test]
+    fn verify_login_hash_rejects_wrong_hash() {
+        let hash = harden_login_hash("hunter2").unwrap();
+        assert!(!verify_login_hash("hunter3", &hash).unwrap());
+    }
+
+    #[test]
+    fn verify_login_hash_malformed_stored_hash_is_internal_error() {
+        let err = verify_login_hash("hunter2", "not-a-phc-hash").unwrap_err();
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.message, "Internal server error");
+    }
+
+    // --- bearer_token_from_headers ---
+
+    #[test]
+    fn bearer_token_decodes_valid_hex() {
+        let token = bearer_token_from_headers(&auth_headers("Bearer 0a0b1c")).unwrap();
+        assert_eq!(token, vec![0x0a, 0x0b, 0x1c]);
+    }
+
+    #[test]
+    fn bearer_token_missing_header_is_unauthorized() {
+        let err = bearer_token_from_headers(&HeaderMap::new()).unwrap_err();
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn bearer_token_wrong_scheme_is_unauthorized() {
+        let err = bearer_token_from_headers(&auth_headers("Basic 0a0b")).unwrap_err();
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn bearer_token_scheme_is_case_sensitive() {
+        let err = bearer_token_from_headers(&auth_headers("bearer 0a0b")).unwrap_err();
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn bearer_token_empty_payload_is_unauthorized() {
+        let err = bearer_token_from_headers(&auth_headers("Bearer ")).unwrap_err();
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn bearer_token_invalid_hex_is_bad_request() {
+        let err = bearer_token_from_headers(&auth_headers("Bearer zz")).unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert_eq!(err.message, "Invalid token format");
+    }
+
+    #[test]
+    fn bearer_token_odd_length_hex_is_bad_request() {
+        let err = bearer_token_from_headers(&auth_headers("Bearer abc")).unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+}

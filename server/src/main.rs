@@ -25,6 +25,7 @@ mod constants;
 
 /// Application error returned by all handlers.
 /// Internal errors are logged server-side and return a generic 500 to the client.
+#[derive(Debug)]
 pub struct AppError {
     status: StatusCode,
     message: String,
