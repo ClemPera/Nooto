@@ -7,6 +7,20 @@ on:
   workflow_dispatch:
 
 jobs:
+  detect-prerelease:
+    name: Detect Pre-release
+    runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - id: check
+        run: |
+          if [[ "${GITHUB_REF_NAME#server-v}" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-linux:
     name: Build Linux Server (${{ matrix.arch }})
     strategy:
@@ -63,6 +77,8 @@ jobs:
 
   push-docker:
     name: Push Docker Image
+    needs: detect-prerelease
+    if: startsWith(github.ref, 'refs/tags/') && needs.detect-prerelease.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: read
