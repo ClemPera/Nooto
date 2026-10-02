@@ -23,6 +23,33 @@ pub enum SyncStatus {
     NotConnected,
 }
 
+/// Clears stored credentials and notifies the frontend when the server rejects the session.
+/// Returns true when the caller should stop this sync tick.
+async fn clear_session_if_unauthorized(
+    state: &Mutex<AppState>,
+    handle: &AppHandle,
+    e: &anyhow::Error,
+) -> bool {
+    let status = e.downcast_ref::<reqwest::Error>().and_then(reqwest::Error::status);
+
+    if !matches!(
+        status,
+        Some(reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN)
+    ) {
+        return false;
+    }
+
+    info!("Session rejected by server, clearing stored credentials");
+
+    if let Err(e) = commands::clear_session(state).await {
+        error!("Failed to clear session: {e:?}");
+    }
+
+    emit(handle, "sync-status", SyncStatus::NotConnected);
+    emit(handle, "session-expired", ());
+    true
+}
+
 /// Background sync loop: every second, pulls new notes from the server then pushes unsynced ones.
 /// Emits `sync-status` and `new_note_metadata` events to the frontend as state changes.
 pub async fn run(handle: AppHandle) {
@@ -50,6 +77,9 @@ pub async fn run(handle: AppHandle) {
                             }
                         }
                         Err(e) => {
+                            if clear_session_if_unauthorized(&state, &handle, &e).await {
+                                break 'sync;
+                            }
                             if e.downcast_ref::<reqwest::Error>().map_or(false, |e| e.is_connect()) {
                                 emit(&handle, "sync-status", SyncStatus::Offline);
                                 info!("Couldn't connect to server");
@@ -72,6 +102,9 @@ pub async fn run(handle: AppHandle) {
                             }
                         }
                         Err(e) => {
+                            if clear_session_if_unauthorized(&state, &handle, &e).await {
+                                break 'sync;
+                            }
                             if e.downcast_ref::<reqwest::Error>().map_or(false, |e| e.is_connect()) {
                                 emit(&handle, "sync-status", SyncStatus::Offline);
                                 info!("Couldn't connect to server");
@@ -109,13 +142,14 @@ pub async fn receive_latest_notes(
     last_seen: i64,
     handle: &AppHandle,
 ) -> Result<Option<i64>> {
+    let token = workspace.token.clone().context("Workspace has no token")?;
+
     let params = SelectNotesParams {
         username: workspace.username.clone().context("Workspace has no username")?,
-        token: hex::encode(workspace.token.clone().context("Workspace has no token")?),
         updated_at: last_seen,
     };
 
-    let notes = sync::operations::select_notes(params, workspace.instance.clone().context("Workspace has no instance")?)
+    let notes = sync::operations::select_notes(params, &token, workspace.instance.clone().context("Workspace has no instance")?)
         .await?;
 
     if notes.is_empty() {
