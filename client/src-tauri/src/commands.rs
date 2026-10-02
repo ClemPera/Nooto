@@ -471,9 +471,8 @@ pub async fn sync_login(
     Ok(())
 }
 
-/// Clears server credentials (token, instance, username) from the workspace without deleting notes.
-#[tauri::command(rename_all = "snake_case")]
-pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
+/// Clears the active workspace's server credentials in memory and in the database.
+pub async fn clear_session(state: &Mutex<AppState>) -> Result<(), CommandError> {
     let mut state = state.lock().await;
 
     let workspace = state
@@ -492,6 +491,12 @@ pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), Comman
     };
 
     Ok(())
+}
+
+/// Clears server credentials (token, instance, username) from the workspace without deleting notes.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
+    clear_session(&state).await
 }
 
 /// Fully removes the active workspace and all its notes from local storage.
