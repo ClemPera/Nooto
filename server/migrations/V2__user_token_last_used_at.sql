@@ -1,1 +1,0 @@
-ALTER TABLE `user_token` ADD COLUMN `last_used_at` BIGINT NOT NULL DEFAULT 0;
