@@ -1,26 +1,31 @@
 use std::env;
+use std::net::SocketAddr;
+use std::sync::Arc;
 
 use anyhow::Context;
 use axum::{
     Json, Router,
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use dotenv::dotenv;
-use mysql_async::{Conn, Pool};
+use mysql_async::Pool;
 use rand::{TryRng, rngs::SysRng};
 use shared::SentNotesResult;
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor};
 
 use crate::schema::User;
 
+mod utils;
 mod schema;
-
 mod migrations;
+mod constants;
 
 /// Application error returned by all handlers.
 /// Internal errors are logged server-side and return a generic 500 to the client.
+#[derive(Debug)]
 pub struct AppError {
     status: StatusCode,
     message: String,
@@ -104,54 +109,53 @@ async fn main() -> anyhow::Result<()> {
 
     drop(conn);
 
-    let app = Router::new()
-        .route("/notes", post(send_notes))
-        .route("/notes", get(select_notes))
-        .route("/note", get(select_note))
+    utils::rehash_legacy_password_hashes(&pool)
+        .await
+        .context("Failed to rehash legacy password hashes")?;
+
+    // Rate-limited below: /login and /create_account are what an attacker would brute-force.
+    let auth_governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .key_extractor(SmartIpKeyExtractor)
+            .per_second(4)
+            .burst_size(5)
+            .finish()
+            .context("Failed to build rate limiter config")?,
+    );
+
+    let auth_routes = Router::new()
         .route("/create_account", post(insert_user))
         // .route("/user", put()) //Update user
         .route("/login", get(login_request))
         .route("/login", post(login))
+        .route("/logout", post(logout))
         // .route("/user_recovery", get()) //Request recovery stuff
         // .route("/user_recovery", post()) //check recovery hash
         // .route("/data_recovery", get()) //Request recovery stuff
         // .route("/data_recovery", post()) //store new recovery stuff
+        .route_layer(GovernorLayer { config: auth_governor_conf });
+
+    let app = Router::new()
+        .route("/notes", post(send_notes))
+        .route("/notes", get(select_notes))
+        .route("/note", get(select_note))
+        .merge(auth_routes)
         .with_state(pool);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
         .expect("Failed to bind TCP listener");
 
-    axum::serve(listener, app)
-        .await
-        .expect("Server error");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("Server error");
 
     Ok(())
 }
 
-/// Verifies that `token` matches one of the stored tokens for `username`.
-/// Returns `Forbidden` if no token matches, or `Unprocessable` if the user doesn't exist.
-async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Result<(), AppError> {
-    //TODO: this could return user honestly
-    let user = schema::User::select(conn, username)
-        .await
-        .map_err(AppError::from)?
-        .ok_or_else(AppError::unprocessable)?;
-
-    let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
-
-    let user_tokens = schema::UserToken::select(conn, user_id)
-        .await
-        .map_err(AppError::from)?;
-
-    for ut in user_tokens {
-        if ut.token == token {
-            return Ok(());
-        }
-    }
-
-    Err(AppError::forbidden())
-}
 
 /// `POST /notes` — upserts a batch of notes for the authenticated user.
 /// Returns per-note results; conflicting notes (server newer and `force` is false) are flagged.
@@ -164,7 +168,7 @@ async fn send_notes(
         .await
         .context("Failed to get DB connection")?;
 
-    user_verify(&mut conn, sent_notes.username.clone(), sent_notes.token).await?;
+    utils::user_verify(&mut conn, sent_notes.username.clone(), sent_notes.token).await?;
 
     let user = User::select(&mut conn, sent_notes.username)
         .await
@@ -196,7 +200,7 @@ async fn send_notes(
                     let mut updated_note: schema::Note = note.into();
                     updated_note.id_user = Some(user_id);
                     updated_note.server_received_at = chrono::Local::now().to_utc().timestamp();
-                    updated_note.update(&mut conn).await.map_err(AppError::from)?;
+                    updated_note.update(&mut conn, user_id).await.map_err(AppError::from)?;
 
                     result.push(SentNotesResult {
                         uuid: updated_note.uuid,
@@ -225,6 +229,7 @@ async fn send_notes(
 /// `GET /notes` — returns all notes for the authenticated user updated after `params.updated_at`.
 async fn select_notes(
     State(pool): State<Pool>,
+    headers: HeaderMap,
     Query(params): Query<shared::SelectNotesParams>,
 ) -> Result<Json<Vec<shared::Note>>, AppError> {
     let mut conn = pool
@@ -232,10 +237,9 @@ async fn select_notes(
         .await
         .context("Failed to get DB connection")?;
 
-    let token = hex::decode(&params.token)
-        .map_err(|_| AppError::bad_request("Invalid token format"))?;
+    let token = utils::bearer_token_from_headers(&headers)?;
 
-    user_verify(&mut conn, params.username.clone(), token).await?;
+    utils::user_verify(&mut conn, params.username.clone(), token).await?;
 
     let user = User::select(&mut conn, params.username)
         .await
@@ -260,6 +264,7 @@ async fn select_notes(
 /// `GET /note` — returns a single note by UUID for the authenticated user.
 async fn select_note(
     State(pool): State<Pool>,
+    headers: HeaderMap,
     Query(params): Query<shared::SelectNoteParams>,
 ) -> Result<Json<shared::Note>, AppError> {
     let mut conn = pool
@@ -267,10 +272,9 @@ async fn select_note(
         .await
         .context("Failed to get DB connection")?;
 
-    let token = hex::decode(&params.token)
-        .map_err(|_| AppError::bad_request("Invalid token format"))?;
+    let token = utils::bearer_token_from_headers(&headers)?;
 
-    user_verify(&mut conn, params.username.clone(), token).await?;
+    utils::user_verify(&mut conn, params.username.clone(), token).await?;
 
     let user = User::select(&mut conn, params.username)
         .await
@@ -293,7 +297,9 @@ async fn insert_user(
     Json(user): Json<shared::User>,
 ) -> Result<(), AppError> {
     println!("received insert_user");
-    let user: schema::User = user.into();
+    let mut user: schema::User = user.into();
+    user.stored_password_hash = utils::harden_login_hash(&user.stored_password_hash)?;
+    user.password_hash_version = constants::CURRENT_PASSWORD_HASH_VERSION;
 
     let mut conn = pool
         .get_conn()
@@ -346,24 +352,26 @@ async fn login(
 
     let user = schema::User::select(&mut conn, params.username)
         .await
-        .map_err(AppError::from)?
-        .ok_or_else(||AppError::not_found("User doesn't exist"))?;
+        .map_err(AppError::from)?;
 
-    if params.login_hash != user.stored_password_hash {
-        return Err(AppError::unauthorized("Wrong password"));
-    }
+    // Same response for missing user and wrong password to avoid enumeration (CWE-203).
+    let user = match user {
+        Some(user) if utils::verify_login_hash(&params.login_hash, &user.stored_password_hash)? => user,
+        _ => return Err(AppError::unauthorized("Invalid username or password")),
+    };
+
+    let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
 
     let mut token = vec![0u8; 32];
     SysRng
         .try_fill_bytes(&mut token)
         .map_err(|e| AppError::internal(anyhow::anyhow!("Failed to generate token: {e}")))?;
 
-    let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
-
     let user_token = schema::UserToken {
         id: None,
         id_user: user_id,
         token,
+        last_used_at: chrono::Local::now().to_utc().timestamp(),
     };
 
     user_token.insert(&mut conn).await.map_err(AppError::from)?;
@@ -374,6 +382,32 @@ async fn login(
         mek_password_nonce: user.mek_password_nonce,
         token: user_token.token,
     }))
+}
+
+/// `POST /logout` — revokes the presented session token.
+async fn logout(
+    State(pool): State<Pool>,
+    Json(params): Json<shared::LogoutParams>,
+) -> Result<StatusCode, AppError> {
+    let mut conn = pool
+        .get_conn()
+        .await
+        .context("Failed to get DB connection")?;
+
+    utils::user_verify(&mut conn, params.username.clone(), params.token.clone()).await?;
+
+    let user = User::select(&mut conn, params.username)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(AppError::unprocessable)?;
+
+    let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
+
+    schema::UserToken::delete(&mut conn, user_id, &params.token)
+        .await
+        .map_err(AppError::from)?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]
