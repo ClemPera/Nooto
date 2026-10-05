@@ -148,6 +148,8 @@ export DATABASE_URL=mysql://nooto:password@localhost:3306/nooto
 
 When creating an account or logging in, open **Advanced settings** and enter your server URL.
 
+> [!IMPORTANT]
+> Released builds of the app only accept HTTPS server URLs. Plain `http://` is not supported, so your server must be served behind a valid SSL certificate (for example with a reverse proxy such as Caddy or nginx using Let's Encrypt). Debug builds allow plain `http://`, which is useful for local testing.
 ---
 
 ## Project structure
