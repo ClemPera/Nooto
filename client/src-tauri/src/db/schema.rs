@@ -158,6 +158,162 @@ impl Note {
     }
 }
 
+/// Local SQLite image row (content is a ciphertext blob). Images are write-once — there's
+/// no `update`, only `insert` and `select`.
+#[derive(Debug, Clone)]
+pub struct Image {
+    pub uuid: String,
+    pub note_uuid: String,
+    pub id_workspace: Option<u32>,
+    pub content: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub synched: bool,
+}
+
+impl From<shared::Image> for Image {
+    fn from(image: shared::Image) -> Self {
+        Image {
+            uuid: image.uuid,
+            note_uuid: image.note_uuid,
+            id_workspace: None,
+            content: image.content,
+            nonce: image.nonce,
+            synched: true,
+        }
+    }
+}
+
+impl Into<shared::Image> for Image {
+    fn into(self) -> shared::Image {
+        shared::Image {
+            uuid: self.uuid,
+            note_uuid: self.note_uuid,
+            content: self.content,
+            nonce: self.nonce,
+        }
+    }
+}
+
+impl Image {
+    /// Creates the `image` table if it does not already exist.
+    pub fn create(conn: &Connection) -> Result<()> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS image (
+                uuid BLOB PRIMARY KEY,
+                note_uuid BLOB NOT NULL,
+                id_workspace INTEGER NOT NULL REFERENCES workspace(id),
+                content BLOB,
+                nonce BLOB,
+                synched INTEGER NOT NULL
+            )",
+            (),
+        )
+        .context("Failed to create image table")?;
+
+        Ok(())
+    }
+
+    /// Fetches an image by UUID. Returns `None` if not cached locally.
+    pub fn select(conn: &Connection, uuid: String) -> Result<Option<Self>> {
+        let image = match conn.query_one(
+            "SELECT * FROM image WHERE uuid = ?",
+            (uuid,),
+            |row| {
+                Ok(Image {
+                    uuid: row.get(0)?,
+                    note_uuid: row.get(1)?,
+                    id_workspace: row.get(2)?,
+                    content: row.get(3)?,
+                    nonce: row.get(4)?,
+                    synched: row.get(5)?,
+                })
+            },
+        ) {
+            Ok(image) => Some(image),
+            Err(_) => None,
+        };
+
+        Ok(image)
+    }
+
+    /// Inserts this image into the database.
+    pub fn insert(&self, conn: &Connection) -> Result<()> {
+        conn.execute(
+            "INSERT INTO image (uuid, note_uuid, content, nonce, id_workspace, synched) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (&self.uuid, &self.note_uuid, &self.content, &self.nonce, &self.id_workspace, &self.synched),
+        )
+        .context("Failed to insert image")?;
+
+        Ok(())
+    }
+
+    /// Returns every image linked to `note_uuid`, regardless of sync status. This is the
+    /// note's attachment library - it can include images no longer referenced anywhere in
+    /// the note's text, since removing an image from the text doesn't delete its data.
+    pub fn select_by_note(conn: &Connection, note_uuid: String) -> Result<Vec<Self>> {
+        let mut stmt = conn
+            .prepare("SELECT * FROM image WHERE note_uuid = ?")
+            .context("Failed to prepare image query")?;
+
+        let images = stmt
+            .query_map([note_uuid], |row| {
+                Ok(Image {
+                    uuid: row.get(0)?,
+                    note_uuid: row.get(1)?,
+                    id_workspace: row.get(2)?,
+                    content: row.get(3)?,
+                    nonce: row.get(4)?,
+                    synched: row.get(5)?,
+                })
+            })
+            .context("Failed to query images")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to read image rows")?;
+
+        Ok(images)
+    }
+
+    /// Returns all unsynced images belonging to `id_workspace`, oldest first.
+    pub fn select_unsynced(conn: &Connection, id_workspace: u32) -> Result<Vec<Self>> {
+        let mut stmt = conn
+            .prepare("SELECT * FROM image WHERE id_workspace = ? AND synched = 0")
+            .context("Failed to prepare image query")?;
+
+        let images = stmt
+            .query_map([id_workspace], |row| {
+                Ok(Image {
+                    uuid: row.get(0)?,
+                    note_uuid: row.get(1)?,
+                    id_workspace: row.get(2)?,
+                    content: row.get(3)?,
+                    nonce: row.get(4)?,
+                    synched: row.get(5)?,
+                })
+            })
+            .context("Failed to query images")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to read image rows")?;
+
+        Ok(images)
+    }
+
+    /// Marks an image as synced after a successful upload.
+    pub fn mark_synched(conn: &Connection, uuid: String) -> Result<()> {
+        conn.execute("UPDATE image SET synched = 1 WHERE uuid = ?", (uuid,))
+            .context("Failed to mark image as synched")?;
+
+        Ok(())
+    }
+
+    /// Deletes an image from the local cache by UUID. A no-op if it isn't cached.
+    pub fn delete(conn: &Connection, uuid: String) -> Result<()> {
+        conn.execute("DELETE FROM image WHERE uuid = ?", (uuid,))
+            .context("Failed to delete image")?;
+
+        Ok(())
+    }
+}
+
 /// Local workspace row — holds the MEK in plaintext and optional server credentials.
 #[derive(Debug, Clone)]
 pub struct Workspace {
@@ -420,6 +576,7 @@ mod tests {
     fn open_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         Note::create(&conn).unwrap();
+        Image::create(&conn).unwrap();
         Workspace::create(&conn).unwrap();
         Common::create(&conn).unwrap();
         conn
@@ -456,6 +613,17 @@ mod tests {
             updated_at: 1700000000,
             synched: false,
             deleted: false,
+        }
+    }
+
+    fn sample_image(workspace_id: u32) -> Image {
+        Image {
+            uuid: "test-image-001".to_string(),
+            note_uuid: "test-uuid-001".to_string(),
+            id_workspace: Some(workspace_id),
+            content: vec![1, 2, 3],
+            nonce: vec![4, 5, 6],
+            synched: false,
         }
     }
 
@@ -599,6 +767,152 @@ mod tests {
         Note::delete_all_from_workspace(&conn, ws_id).unwrap();
 
         assert!(Note::select_all(&conn, ws_id).unwrap().is_empty());
+    }
+
+    // --- Image conversions ---
+
+    #[test]
+    fn image_from_shared_sets_synched_true() {
+        let shared = shared::Image {
+            uuid: "uuid".to_string(),
+            note_uuid: "note-uuid".to_string(),
+            content: vec![],
+            nonce: vec![],
+        };
+        let image = Image::from(shared);
+        assert!(image.synched);
+        assert!(image.id_workspace.is_none());
+    }
+
+    #[test]
+    fn image_into_shared_drops_local_fields() {
+        let image = sample_image(1);
+        let shared: shared::Image = image.into();
+        assert_eq!(shared.uuid, "test-image-001");
+        assert_eq!(shared.note_uuid, "test-uuid-001");
+        assert_eq!(shared.content, vec![1, 2, 3]);
+    }
+
+    // --- Image DB operations ---
+
+    #[test]
+    fn image_insert_and_select() {
+        let conn = open_db();
+        let ws = sample_workspace("ws1");
+        ws.insert(&conn).unwrap();
+        let ws_id = conn.last_insert_rowid() as u32;
+
+        let image = sample_image(ws_id);
+        image.insert(&conn).unwrap();
+
+        let fetched = Image::select(&conn, image.uuid.clone()).unwrap().unwrap();
+        assert_eq!(fetched.uuid, image.uuid);
+        assert_eq!(fetched.note_uuid, image.note_uuid);
+        assert_eq!(fetched.content, image.content);
+        assert_eq!(fetched.nonce, image.nonce);
+        assert!(!fetched.synched);
+    }
+
+    #[test]
+    fn image_select_missing_returns_none() {
+        let conn = open_db();
+        let result = Image::select(&conn, "nonexistent".to_string()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn image_select_by_note_returns_only_that_notes_images() {
+        let conn = open_db();
+        let ws = sample_workspace("ws1");
+        ws.insert(&conn).unwrap();
+        let ws_id = conn.last_insert_rowid() as u32;
+
+        let mut image_a = sample_image(ws_id);
+        image_a.uuid = "image-a".to_string();
+        image_a.note_uuid = "note-a".to_string();
+        image_a.insert(&conn).unwrap();
+
+        let mut image_b = sample_image(ws_id);
+        image_b.uuid = "image-b".to_string();
+        image_b.note_uuid = "note-b".to_string();
+        image_b.insert(&conn).unwrap();
+
+        let result = Image::select_by_note(&conn, "note-a".to_string()).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].uuid, "image-a");
+    }
+
+    #[test]
+    fn image_select_by_note_includes_synched_images() {
+        let conn = open_db();
+        let ws = sample_workspace("ws1");
+        ws.insert(&conn).unwrap();
+        let ws_id = conn.last_insert_rowid() as u32;
+
+        let mut image = sample_image(ws_id);
+        image.synched = true;
+        image.insert(&conn).unwrap();
+
+        let result = Image::select_by_note(&conn, image.note_uuid).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn image_select_unsynced_excludes_synched_rows() {
+        let conn = open_db();
+        let ws = sample_workspace("ws1");
+        ws.insert(&conn).unwrap();
+        let ws_id = conn.last_insert_rowid() as u32;
+
+        let mut unsynced = sample_image(ws_id);
+        unsynced.uuid = "unsynced-image".to_string();
+        unsynced.insert(&conn).unwrap();
+
+        let mut synched = sample_image(ws_id);
+        synched.uuid = "synched-image".to_string();
+        synched.synched = true;
+        synched.insert(&conn).unwrap();
+
+        let result = Image::select_unsynced(&conn, ws_id).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].uuid, "unsynced-image");
+    }
+
+    #[test]
+    fn image_mark_synched() {
+        let conn = open_db();
+        let ws = sample_workspace("ws1");
+        ws.insert(&conn).unwrap();
+        let ws_id = conn.last_insert_rowid() as u32;
+
+        let image = sample_image(ws_id);
+        image.insert(&conn).unwrap();
+
+        Image::mark_synched(&conn, image.uuid.clone()).unwrap();
+
+        let fetched = Image::select(&conn, image.uuid).unwrap().unwrap();
+        assert!(fetched.synched);
+    }
+
+    #[test]
+    fn image_delete_removes_the_row() {
+        let conn = open_db();
+        let ws = sample_workspace("ws1");
+        ws.insert(&conn).unwrap();
+        let ws_id = conn.last_insert_rowid() as u32;
+
+        let image = sample_image(ws_id);
+        image.insert(&conn).unwrap();
+
+        Image::delete(&conn, image.uuid.clone()).unwrap();
+
+        assert!(Image::select(&conn, image.uuid).unwrap().is_none());
+    }
+
+    #[test]
+    fn image_delete_missing_is_a_noop() {
+        let conn = open_db();
+        Image::delete(&conn, "nonexistent".to_string()).unwrap();
     }
 
     // --- Workspace DB operations ---
