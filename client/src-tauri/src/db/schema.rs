@@ -414,8 +414,7 @@ impl Common {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes_gcm::{Aes256Gcm, KeyInit};
-    use argon2::password_hash::rand_core::OsRng;
+    use aes_gcm::aead::Generate;
 
     fn open_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -426,7 +425,7 @@ mod tests {
     }
 
     fn random_key() -> Key<Aes256Gcm> {
-        Aes256Gcm::generate_key(OsRng)
+        Key::<Aes256Gcm>::generate()
     }
 
     fn sample_workspace(name: &str) -> Workspace {
