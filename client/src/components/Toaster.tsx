@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useToasts, Toast } from "../store/toasts";
 import { ErrorKind } from "../lib/errors";
 

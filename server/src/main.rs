@@ -8,7 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use dotenv::dotenv;
+use dotenvy::dotenv;
 use mysql_async::{Conn, Pool};
 use rand::{TryRng, rngs::SysRng};
 use shared::SentNotesResult;

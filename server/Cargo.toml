@@ -25,8 +25,8 @@ assets = [
 shared = { path = "../shared" }
 axum = { version="0.8", features = ["macros"] }
 chrono = { version="0.4", features = ["serde"] }
-dotenv = "0.15"   
-mysql_async = { version="0.36", features = ["chrono"] }
+dotenvy = "0.15"   
+mysql_async = { version="0.37", features = ["chrono"] }
 rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 tokio = { version="1.48", features = ["rt-multi-thread"]}

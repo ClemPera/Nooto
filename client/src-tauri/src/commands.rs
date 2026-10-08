@@ -705,11 +705,10 @@ pub async fn handle_conflict(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes_gcm::{Aes256Gcm, KeyInit};
-    use argon2::password_hash::rand_core::OsRng;
+    use aes_gcm::{Aes256Gcm, aead::Generate};
 
     fn random_key() -> aes_gcm::Key<Aes256Gcm> {
-        Aes256Gcm::generate_key(OsRng)
+        aes_gcm::Key::<Aes256Gcm>::generate()
     }
 
     fn dummy_workspace(name: &str) -> Workspace {

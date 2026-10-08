@@ -1,16 +1,13 @@
 use aes_gcm::{
-    aead::Aead,
-    AeadCore, Aes256Gcm, Key, KeyInit, Nonce,
+    aead::{Aead, Generate, Nonce as AeadNonce},
+    Aes256Gcm, Key, KeyInit,
 };
 use anyhow::{Context, Result};
 use argon2::{
-    password_hash::{
-        rand_core::OsRng,
-        PasswordHasher, SaltString,
-    },
-    Argon2,
+    Argon2, PasswordHasher,
+    password_hash::phc::SaltString,
 };
-use bip39::Language;
+use bip39::{Language, WordCount};
 use serde::{Deserialize, Serialize};
 use shared::LoginRequest;
 
@@ -71,27 +68,28 @@ pub struct WorkspaceEncryptionData {
 /// Generates a fresh AES-256-GCM master encryption key (MEK) and encrypts it with a
 /// BIP-39 recovery key. Returns all material needed to bootstrap a new workspace.
 pub fn create_workspace() -> Result<WorkspaceEncryptionData> {
-    let master_encryption_key: Key<Aes256Gcm> = Aes256Gcm::generate_key(OsRng).into();
+    let master_encryption_key: Key<Aes256Gcm> = Key::<Aes256Gcm>::generate();
 
-    let recovery_key_data = bip39::Mnemonic::generate_in(Language::English, 24)
+    let recovery_key_data = bip39::Mnemonic::generate_in(Language::English, WordCount::Words24)
         .context("Failed to generate recovery mnemonic")?
         .to_string();
 
     let argon2 = Argon2::default();
-    let salt_recovery_data = SaltString::generate(&mut OsRng);
+    let salt_recovery_data = SaltString::generate();
 
     let recovery_hash_data = argon2
-        .hash_password(recovery_key_data.as_bytes(), &salt_recovery_data)
+        .hash_password_with_salt(recovery_key_data.as_bytes(), &salt_recovery_data.to_salt())
         .map_err(|e| anyhow::anyhow!("Failed to hash recovery key: {e}"))?;
 
     let recovery_key_hash = recovery_hash_data
         .hash
         .context("Recovery key hash is missing")?;
 
-    let recovery_key = Key::<Aes256Gcm>::from_slice(recovery_key_hash.as_bytes());
+    let recovery_key: &Key<Aes256Gcm> = recovery_key_hash.as_bytes().try_into()
+        .expect("argon2 output must be 32 bytes");
     let cipher = Aes256Gcm::new(recovery_key);
 
-    let mek_recovery_nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let mek_recovery_nonce = AeadNonce::<Aes256Gcm>::generate();
 
     let encrypted_mek_recovery = cipher
         .encrypt(&mek_recovery_nonce, master_encryption_key.as_slice())
@@ -109,52 +107,53 @@ pub fn create_workspace() -> Result<WorkspaceEncryptionData> {
 /// Derives all server-side hashes and encrypts the MEK with the user's password.
 /// Returns the data to be sent to the server during account registration.
 pub fn create_account(password: String, mek: Key<Aes256Gcm>) -> Result<AccountEncryptionData> {
-    let recovery_key_auth = bip39::Mnemonic::generate_in(Language::English, 24)
+    let recovery_key_auth = bip39::Mnemonic::generate_in(Language::English, WordCount::Words24)
         .context("Failed to generate recovery mnemonic")?
         .to_string();
 
     let argon2 = Argon2::default();
 
-    let salt_auth = SaltString::generate(&mut OsRng);
-    let salt_data = SaltString::generate(&mut OsRng);
-    let salt_recovery_auth = SaltString::generate(&mut OsRng);
-    let salt_server_auth = SaltString::generate(&mut OsRng);
-    let salt_server_recovery = SaltString::generate(&mut OsRng);
+    let salt_auth = SaltString::generate();
+    let salt_data = SaltString::generate();
+    let salt_recovery_auth = SaltString::generate();
+    let salt_server_auth = SaltString::generate();
+    let salt_server_recovery = SaltString::generate();
 
     let password_hash_auth = argon2
-        .hash_password(password.as_bytes(), &salt_auth)
+        .hash_password_with_salt(password.as_bytes(), &salt_auth.to_salt())
         .map_err(|e| anyhow::anyhow!("Failed to hash password (auth): {e}"))?
         .to_string();
 
     let recovery_hash_auth = argon2
-        .hash_password(recovery_key_auth.as_bytes(), &salt_recovery_auth)
+        .hash_password_with_salt(recovery_key_auth.as_bytes(), &salt_recovery_auth.to_salt())
         .map_err(|e| anyhow::anyhow!("Failed to hash recovery key (auth): {e}"))?
         .to_string();
 
     let password_hash_data = argon2
-        .hash_password(password.as_bytes(), &salt_data)
+        .hash_password_with_salt(password.as_bytes(), &salt_data.to_salt())
         .map_err(|e| anyhow::anyhow!("Failed to hash password (data): {e}"))?;
 
     let password_key_hash = password_hash_data
         .hash
         .context("Password key hash is missing")?;
 
-    let password_key = Key::<Aes256Gcm>::from_slice(password_key_hash.as_bytes());
+    let password_key: &Key<Aes256Gcm> = password_key_hash.as_bytes().try_into()
+        .expect("argon2 output must be 32 bytes");
     let cipher = Aes256Gcm::new(password_key);
 
-    let mek_password_nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let mek_password_nonce = AeadNonce::<Aes256Gcm>::generate();
 
     let encrypted_mek_password = cipher
         .encrypt(&mek_password_nonce, mek.as_slice())
         .map_err(|e| anyhow::anyhow!("Failed to encrypt MEK with password: {e}"))?;
 
     let stored_password_hash = argon2
-        .hash_password(password_hash_auth.as_bytes(), &salt_server_auth)
+        .hash_password_with_salt(password_hash_auth.as_bytes(), &salt_server_auth.to_salt())
         .map_err(|e| anyhow::anyhow!("Failed to hash password for server storage: {e}"))?
         .to_string();
 
     let stored_recovery_hash = argon2
-        .hash_password(recovery_hash_auth.as_bytes(), &salt_server_recovery)
+        .hash_password_with_salt(recovery_hash_auth.as_bytes(), &salt_server_recovery.to_salt())
         .map_err(|e| anyhow::anyhow!("Failed to hash recovery key for server storage: {e}"))?
         .to_string();
 
@@ -183,12 +182,12 @@ pub fn login(login_request: LoginRequest, password: String) -> Result<String> {
         .map_err(|e| anyhow::anyhow!("Invalid salt_server_auth from server: {e}"))?;
 
     let password_hash_auth = argon2
-        .hash_password(password.as_bytes(), &salt_auth)
+        .hash_password_with_salt(password.as_bytes(), &salt_auth.to_salt())
         .map_err(|e| anyhow::anyhow!("Failed to hash password: {e}"))?
         .to_string();
 
     argon2
-        .hash_password(password_hash_auth.as_bytes(), &salt_server_auth)
+        .hash_password_with_salt(password_hash_auth.as_bytes(), &salt_server_auth.to_salt())
         .map_err(|e| anyhow::anyhow!("Failed to hash password for server auth: {e}"))
         .map(|h| h.to_string())
 }
@@ -206,24 +205,27 @@ pub fn decrypt_mek(
         .map_err(|e| anyhow::anyhow!("Invalid salt_data from server: {e}"))?;
 
     let password_hash_data = argon2
-        .hash_password(password.as_bytes(), &salt_data)
+        .hash_password_with_salt(password.as_bytes(), &salt_data.to_salt())
         .map_err(|e| anyhow::anyhow!("Failed to hash password for decryption: {e}"))?;
 
     let password_key_hash = password_hash_data
         .hash
         .context("Password key hash is missing")?;
 
-    let password_key = Key::<Aes256Gcm>::from_slice(password_key_hash.as_bytes());
+    let password_key: &Key<Aes256Gcm> = password_key_hash.as_bytes().try_into()
+        .expect("argon2 output must be 32 bytes");
     let cipher = Aes256Gcm::new(password_key);
 
+    let mek_nonce: AeadNonce<Aes256Gcm> = mek_password_nonce.as_slice().try_into()
+        .expect("MEK nonce must be 12 bytes");
     let mek_slice = cipher
         .decrypt(
-            Nonce::from_slice(&mek_password_nonce),
+            &mek_nonce,
             encrypted_mek_password.as_slice(),
         )
         .map_err(|e| anyhow::anyhow!("Failed to decrypt master encryption key: {e}"))?;
 
-    let mek = Key::<Aes256Gcm>::from_slice(&mek_slice);
+    let mek: &Key<Aes256Gcm> = mek_slice.as_slice().try_into().expect("MEK must be 32 bytes");
 
     Ok(mek.to_owned())
 }
@@ -231,7 +233,7 @@ pub fn decrypt_mek(
 /// Encrypts `data` with AES-256-GCM using a fresh random nonce.
 /// Returns `(ciphertext, nonce)`.
 pub fn encrypt_data(data: &[u8], key: &Key<Aes256Gcm>) -> Result<(Vec<u8>, Vec<u8>)> {
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let nonce = AeadNonce::<Aes256Gcm>::generate();
     let cipher = Aes256Gcm::new(key);
     let ciphertext = cipher
         .encrypt(&nonce, data)
@@ -241,7 +243,7 @@ pub fn encrypt_data(data: &[u8], key: &Key<Aes256Gcm>) -> Result<(Vec<u8>, Vec<u
 
 /// Decrypts AES-256-GCM `ciphertext` with the given `nonce` and `key`.
 pub fn decrypt_data(ciphertext: &[u8], nonce: &[u8], key: &Key<Aes256Gcm>) -> Result<Vec<u8>> {
-    let nonce = Nonce::from_slice(nonce);
+    let nonce: &AeadNonce<Aes256Gcm> = nonce.try_into().expect("nonce must be 12 bytes");
     let cipher = Aes256Gcm::new(key);
     let plaintext = cipher
         .decrypt(nonce, ciphertext)
@@ -252,11 +254,9 @@ pub fn decrypt_data(ciphertext: &[u8], nonce: &[u8], key: &Key<Aes256Gcm>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes_gcm::{Aes256Gcm, KeyInit};
-    use argon2::password_hash::rand_core::{OsRng};
 
     fn random_key() -> Key<Aes256Gcm> {
-        Aes256Gcm::generate_key(OsRng)
+        Key::<Aes256Gcm>::generate()
     }
 
     // --- encrypt_data / decrypt_data ---
