@@ -78,7 +78,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: client
-        run: npm install
+        run: npm ci
 
       - uses: tauri-apps/tauri-action@v0
         if: startsWith(github.ref, 'refs/tags/')
@@ -168,7 +168,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: client
-        run: npm install
+        run: npm ci
 
       - name: setup Android signing
         working-directory: client
