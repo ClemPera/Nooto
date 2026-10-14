@@ -125,7 +125,6 @@ export default function Toaster() {
         z-[9999]
         flex flex-col-reverse gap-2
         w-[calc(100vw-2rem)] max-w-sm
-        pb-[env(safe-area-inset-bottom)]
         pointer-events-none
       "
       aria-label="Notifications"

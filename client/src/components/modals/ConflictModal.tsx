@@ -95,7 +95,7 @@ export default function ConflictModal() {
   const diff = computeDiff(localNote.content, conflictNote.content);
 
   return (
-    <div className="min-h-screen min-w-screen pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] flex items-center justify-center p-4 fixed z-50">
+    <div className="min-h-screen min-w-screen flex items-center justify-center p-4 fixed z-50">
       <div className="fixed inset-0 backdrop-blur-sm bg-black/40" />
 
       <div className="relative bg-slate-800 rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[90vh]">

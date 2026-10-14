@@ -56,7 +56,7 @@ function App() {
       <Toaster />
 
       {!workspace && (
-        <div className="flex grow place-items-center place-content-center text-2xl text-center text-white bg-slate-800 min-h-screen pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] backdrop-blur-sm">
+        <div className="flex grow place-items-center place-content-center text-2xl text-center text-white bg-slate-800 min-h-screen backdrop-blur-sm">
           Creating workspace...
         </div>
       )}
