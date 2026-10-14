@@ -88,7 +88,7 @@ export default function Sidebar({
   return (
     <div
       className={`
-        fixed lg:relative inset-y-0 left-0 z-40 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]
+        fixed lg:relative inset-y-0 left-0 z-40
         w-80 bg-slate-800 border-r border-slate-700 flex flex-col
         transform transition-transform duration-200 ease-in-out
         ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
