@@ -44,9 +44,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
 
@@ -80,7 +80,7 @@ jobs:
         working-directory: client
         run: npm ci
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -105,7 +105,7 @@ jobs:
           tar -czf "$ARCHIVE" -C "$(dirname "$BIN_PATH")" "$(basename "$BIN_PATH")"
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           draft: true
@@ -119,13 +119,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -195,13 +195,13 @@ jobs:
           echo "APK_FILES=$(cat apk-paths.txt | tr '\n' ',' | sed 's/,$//')" >> "$GITHUB_ENV"
 
       - name: Upload signed APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nooto-android-arm64
           path: client/src-tauri/gen/android/app/build/outputs/apk/arm64/release/*.apk
           if-no-files-found: error
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           tag_name: ${{ github.ref_name }}
