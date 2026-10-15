@@ -254,9 +254,25 @@ pub fn decrypt_data(ciphertext: &[u8], nonce: &[u8], key: &Key<Aes256Gcm>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use argon2::password_hash::phc::PasswordHash;
+    use bip39::Mnemonic;
 
     fn random_key() -> Key<Aes256Gcm> {
         Key::<Aes256Gcm>::generate()
+    }
+
+    fn parse_phc(s: &str) -> PasswordHash {
+        PasswordHash::new(s).expect("expected valid PHC string")
+    }
+
+    fn word_count(phrase: &str) -> usize {
+        phrase.split_whitespace().count()
+    }
+
+    fn assert_valid_24_word_mnemonic(phrase: &str) {
+        assert_eq!(word_count(phrase), 24, "mnemonic must be 24 words");
+        Mnemonic::parse_in(Language::English, phrase)
+            .expect("mnemonic must be valid BIP39 English");
     }
 
     // --- encrypt_data / decrypt_data ---
@@ -324,6 +340,46 @@ mod tests {
         assert_eq!(decrypted, b"");
     }
 
+    #[test]
+    fn encrypt_data_output_lengths() {
+        let key = random_key();
+
+        let (ct_empty, nonce_empty) = encrypt_data(b"", &key).unwrap();
+        assert_eq!(nonce_empty.len(), 12);
+        assert_eq!(ct_empty.len(), 16, "empty plaintext + 16-byte tag");
+
+        let (ct_5, nonce_5) = encrypt_data(b"hello", &key).unwrap();
+        assert_eq!(nonce_5.len(), 12);
+        assert_eq!(ct_5.len(), 5 + 16);
+    }
+
+    #[test]
+    fn decrypt_data_tampered_nonce_fails() {
+        let key = random_key();
+        let (ciphertext, mut nonce) = encrypt_data(b"data", &key).unwrap();
+        nonce[0] ^= 0xFF;
+
+        assert!(decrypt_data(&ciphertext, &nonce, &key).is_err());
+    }
+
+    #[test]
+    #[should_panic]
+    fn decrypt_data_wrong_length_nonce_panics() {
+        // NOTE (branch, aes-gcm 0.11): nonce.try_into().expect() panics on
+        // anything other than 12 bytes, same as main's Nonce::from_slice.
+        let key = random_key();
+        let (ciphertext, nonce) = encrypt_data(b"data", &key).unwrap();
+        let _ = decrypt_data(&ciphertext, &nonce[..8], &key);
+    }
+
+    #[test]
+    fn decrypt_data_empty_ciphertext_fails() {
+        let key = random_key();
+        let (_, nonce) = encrypt_data(b"data", &key).unwrap();
+
+        assert!(decrypt_data(&[], &nonce, &key).is_err());
+    }
+
     // --- decrypt_mek ---
 
     #[test]
@@ -357,5 +413,238 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn decrypt_mek_invalid_salt_data_fails() {
+        let account_data = create_account("password".to_string(), random_key()).unwrap();
+
+        let result = decrypt_mek(
+            "password".to_string(),
+            account_data.encrypted_mek_password,
+            "!!!not-base64!!!".to_string(),
+            account_data.mek_password_nonce,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decrypt_mek_tampered_ciphertext_and_nonce_fail() {
+        let password = "password".to_string();
+        let account_data = create_account(password.clone(), random_key()).unwrap();
+
+        let mut bad_ct = account_data.encrypted_mek_password.clone();
+        bad_ct[0] ^= 0xFF;
+        assert!(decrypt_mek(
+            password.clone(),
+            bad_ct,
+            account_data.salt_data.to_string(),
+            account_data.mek_password_nonce.clone(),
+        )
+        .is_err());
+
+        let mut bad_nonce = account_data.mek_password_nonce.clone();
+        bad_nonce[0] ^= 0xFF;
+        assert!(decrypt_mek(
+            password,
+            account_data.encrypted_mek_password,
+            account_data.salt_data.to_string(),
+            bad_nonce,
+        )
+        .is_err());
+    }
+
+    #[test]
+    #[should_panic]
+    fn decrypt_mek_truncated_nonce_panics() {
+        // NOTE (branch, aes-gcm 0.11): nonce.try_into().expect() panics on
+        // anything other than 12 bytes, same as main's Nonce::from_slice.
+        let password = "password".to_string();
+        let account_data = create_account(password.clone(), random_key()).unwrap();
+        let short_nonce = account_data.mek_password_nonce[..8].to_vec();
+
+        let _ = decrypt_mek(
+            password,
+            account_data.encrypted_mek_password,
+            account_data.salt_data.to_string(),
+            short_nonce,
+        );
+    }
+
+    // --- create_workspace ---
+
+    #[test]
+    fn create_workspace_outputs_differ_across_calls() {
+        let w1 = create_workspace().unwrap();
+        let w2 = create_workspace().unwrap();
+
+        assert_ne!(
+            w1.master_encryption_key.as_slice(),
+            w2.master_encryption_key.as_slice()
+        );
+        assert_ne!(w1.recovery_key_data, w2.recovery_key_data);
+        assert_ne!(
+            w1.salt_recovery_data.to_string(),
+            w2.salt_recovery_data.to_string()
+        );
+        assert_ne!(w1.mek_recovery_nonce, w2.mek_recovery_nonce);
+        assert_ne!(w1.encrypted_mek_recovery, w2.encrypted_mek_recovery);
+    }
+
+    #[test]
+    fn create_workspace_field_shapes() {
+        let w = create_workspace().unwrap();
+
+        assert_valid_24_word_mnemonic(&w.recovery_key_data);
+        SaltString::from_b64(&w.salt_recovery_data.to_string())
+            .expect("salt_recovery_data must parse as SaltString");
+        assert_eq!(w.mek_recovery_nonce.len(), 12);
+        assert_eq!(w.encrypted_mek_recovery.len(), 32 + 16);
+        assert_eq!(w.master_encryption_key.as_slice().len(), 32);
+    }
+
+    #[test]
+    fn create_workspace_recovery_key_decrypts_mek() {
+        let w = create_workspace().unwrap();
+
+        // Re-derive the recovery key exactly like create_workspace does and
+        // prove the stored ciphertext actually decrypts to the MEK.
+        let argon2 = Argon2::default();
+        let hash = argon2
+            .hash_password_with_salt(
+                w.recovery_key_data.as_bytes(),
+                &w.salt_recovery_data.to_salt(),
+            )
+            .unwrap();
+        let output = hash.hash.expect("hash missing");
+        let recovery_key: &Key<Aes256Gcm> = output
+            .as_bytes()
+            .try_into()
+            .expect("argon2 output must be 32 bytes");
+        let nonce: &AeadNonce<Aes256Gcm> = w.mek_recovery_nonce.as_slice().try_into().expect("nonce must be 12 bytes");
+        let plaintext = Aes256Gcm::new(recovery_key)
+            .decrypt(nonce, w.encrypted_mek_recovery.as_slice())
+            .unwrap();
+
+        assert_eq!(plaintext, w.master_encryption_key.as_slice());
+    }
+
+    // --- create_account ---
+
+    #[test]
+    fn create_account_outputs_differ_across_calls() {
+        let mek = random_key();
+        let a1 = create_account("same-password".to_string(), mek.clone()).unwrap();
+        let a2 = create_account("same-password".to_string(), mek).unwrap();
+
+        for (s1, s2) in [
+            (&a1.salt_auth, &a2.salt_auth),
+            (&a1.salt_data, &a2.salt_data),
+            (&a1.salt_recovery_auth, &a2.salt_recovery_auth),
+            (&a1.salt_server_auth, &a2.salt_server_auth),
+            (&a1.salt_server_recovery, &a2.salt_server_recovery),
+        ] {
+            assert_ne!(s1.to_string(), s2.to_string());
+        }
+        assert_ne!(a1.mek_password_nonce, a2.mek_password_nonce);
+        assert_ne!(a1.encrypted_mek_password, a2.encrypted_mek_password);
+        assert_ne!(a1.stored_password_hash, a2.stored_password_hash);
+        assert_ne!(a1.stored_recovery_hash, a2.stored_recovery_hash);
+        assert_ne!(a1.recovery_key_auth, a2.recovery_key_auth);
+    }
+
+    #[test]
+    fn create_account_salts_distinct_and_valid() {
+        let a = create_account("password".to_string(), random_key()).unwrap();
+        let salts = [
+            a.salt_auth.to_string(),
+            a.salt_data.to_string(),
+            a.salt_recovery_auth.to_string(),
+            a.salt_server_auth.to_string(),
+            a.salt_server_recovery.to_string(),
+        ];
+
+        let mut dedup = salts.to_vec();
+        dedup.sort();
+        dedup.dedup();
+        assert_eq!(dedup.len(), 5, "all 5 salts must be distinct");
+
+        for s in &salts {
+            SaltString::from_b64(s).expect("salt must parse as SaltString");
+        }
+    }
+
+    #[test]
+    fn create_account_field_shapes() {
+        let a = create_account("password".to_string(), random_key()).unwrap();
+
+        assert_valid_24_word_mnemonic(&a.recovery_key_auth);
+        assert_eq!(a.mek_password_nonce.len(), 12);
+        assert_eq!(a.encrypted_mek_password.len(), 32 + 16);
+        parse_phc(&a.stored_password_hash);
+        parse_phc(&a.stored_recovery_hash);
+        assert_ne!(a.stored_password_hash, a.stored_recovery_hash);
+    }
+
+    // --- login ---
+
+    fn login_request_for(
+        password: &str,
+        mek: Key<Aes256Gcm>,
+    ) -> (AccountEncryptionData, LoginRequest) {
+        let account = create_account(password.to_string(), mek).unwrap();
+        let request = LoginRequest {
+            salt_auth: account.salt_auth.to_string(),
+            salt_server_auth: account.salt_server_auth.to_string(),
+        };
+        (account, request)
+    }
+
+    #[test]
+    fn login_reproduces_stored_password_hash() {
+        let (account, request) = login_request_for("correct_password", random_key());
+
+        let login_hash = login(request, "correct_password".to_string()).unwrap();
+
+        parse_phc(&login_hash);
+        assert_eq!(login_hash, account.stored_password_hash);
+    }
+
+    #[test]
+    fn login_wrong_password_returns_different_hash() {
+        let (account, request) = login_request_for("correct_password", random_key());
+
+        let login_hash = login(request, "wrong_password".to_string()).unwrap();
+
+        parse_phc(&login_hash);
+        assert_ne!(login_hash, account.stored_password_hash);
+    }
+
+    #[test]
+    fn login_invalid_salts_fail() {
+        let (_, good) = login_request_for("password", random_key());
+
+        let bad_auth = LoginRequest {
+            salt_auth: "!!!not-base64!!!".to_string(),
+            salt_server_auth: good.salt_server_auth.clone(),
+        };
+        assert!(login(bad_auth, "password".to_string()).is_err());
+
+        let bad_server = LoginRequest {
+            salt_auth: good.salt_auth.clone(),
+            salt_server_auth: "!!!not-base64!!!".to_string(),
+        };
+        assert!(login(bad_server, "password".to_string()).is_err());
+    }
+
+    #[test]
+    fn login_empty_password_succeeds() {
+        let (_, request) = login_request_for("password", random_key());
+
+        // Argon2 accepts empty passwords; login hashing must not reject them.
+        let result = login(request, String::new());
+        assert!(result.is_ok());
+        parse_phc(&result.unwrap());
     }
 }
