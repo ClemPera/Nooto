@@ -275,8 +275,6 @@ mod tests {
             .expect("mnemonic must be valid BIP39 English");
     }
 
-    // --- encrypt_data / decrypt_data ---
-
     #[test]
     fn encrypt_decrypt_roundtrip() {
         let key = random_key();
@@ -365,8 +363,6 @@ mod tests {
     #[test]
     #[should_panic]
     fn decrypt_data_wrong_length_nonce_panics() {
-        // NOTE (branch, aes-gcm 0.11): nonce.try_into().expect() panics on
-        // anything other than 12 bytes, same as main's Nonce::from_slice.
         let key = random_key();
         let (ciphertext, nonce) = encrypt_data(b"data", &key).unwrap();
         let _ = decrypt_data(&ciphertext, &nonce[..8], &key);
@@ -379,8 +375,6 @@ mod tests {
 
         assert!(decrypt_data(&[], &nonce, &key).is_err());
     }
-
-    // --- decrypt_mek ---
 
     #[test]
     fn decrypt_mek_roundtrip() {
@@ -458,8 +452,6 @@ mod tests {
     #[test]
     #[should_panic]
     fn decrypt_mek_truncated_nonce_panics() {
-        // NOTE (branch, aes-gcm 0.11): nonce.try_into().expect() panics on
-        // anything other than 12 bytes, same as main's Nonce::from_slice.
         let password = "password".to_string();
         let account_data = create_account(password.clone(), random_key()).unwrap();
         let short_nonce = account_data.mek_password_nonce[..8].to_vec();
@@ -471,8 +463,6 @@ mod tests {
             short_nonce,
         );
     }
-
-    // --- create_workspace ---
 
     #[test]
     fn create_workspace_outputs_differ_across_calls() {
@@ -507,9 +497,6 @@ mod tests {
     #[test]
     fn create_workspace_recovery_key_decrypts_mek() {
         let w = create_workspace().unwrap();
-
-        // Re-derive the recovery key exactly like create_workspace does and
-        // prove the stored ciphertext actually decrypts to the MEK.
         let argon2 = Argon2::default();
         let hash = argon2
             .hash_password_with_salt(
@@ -529,8 +516,6 @@ mod tests {
 
         assert_eq!(plaintext, w.master_encryption_key.as_slice());
     }
-
-    // --- create_account ---
 
     #[test]
     fn create_account_outputs_differ_across_calls() {
@@ -587,8 +572,6 @@ mod tests {
         assert_ne!(a.stored_password_hash, a.stored_recovery_hash);
     }
 
-    // --- login ---
-
     fn login_request_for(
         password: &str,
         mek: Key<Aes256Gcm>,
@@ -641,10 +624,33 @@ mod tests {
     #[test]
     fn login_empty_password_succeeds() {
         let (_, request) = login_request_for("password", random_key());
-
-        // Argon2 accepts empty passwords; login hashing must not reject them.
         let result = login(request, String::new());
         assert!(result.is_ok());
         parse_phc(&result.unwrap());
+    }
+
+    #[test]
+    fn old_salts_unlock_same_hashes() {
+        // Pinned vectors generated on main pre-migration.
+        let expected_auth = "$argon2id$v=19$m=19456,t=2,p=1$BT0o9jV3EHXq0pDtuKwhnQ$i5JO+R8rpB3Oz6QIxJnaJPJng0gL8cvzsrv2tTfqlmM";
+        let expected_data = "$argon2id$v=19$m=19456,t=2,p=1$r0hiAHmXmVpkzg4Ii96Ehw$6Er/i1PRRBD9Sw6iLi6Oj8C5BzAaSvgXOEZdnhQAmg4";
+
+        let salt_auth = SaltString::from_b64("BT0o9jV3EHXq0pDtuKwhnQ")
+            .expect("old salt_auth must parse");
+        let salt_data = SaltString::from_b64("r0hiAHmXmVpkzg4Ii96Ehw")
+            .expect("old salt_data must parse");
+
+        let argon2 = Argon2::default();
+        let hash_auth = argon2
+            .hash_password_with_salt(b"johndoe", &salt_auth.to_salt())
+            .expect("auth re-derive must succeed")
+            .to_string();
+        let hash_data = argon2
+            .hash_password_with_salt(b"johndoe", &salt_data.to_salt())
+            .expect("data re-derive must succeed")
+            .to_string();
+
+        assert_eq!(hash_auth, expected_auth);
+        assert_eq!(hash_data, expected_data);
     }
 }
