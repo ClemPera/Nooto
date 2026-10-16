@@ -181,7 +181,7 @@ export default function Home() {
   const deletedCount = notes.filter((n) => n.deleted && !n.is_folder).length;
 
   return (
-    <div className="flex h-dvh pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] bg-slate-900 overflow-hidden overscroll-none">
+    <div className="flex h-dvh bg-slate-900 overflow-hidden overscroll-none">
       {sidebarOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-40 lg:hidden"
