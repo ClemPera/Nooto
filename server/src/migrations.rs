@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use mysql_async::{Conn, params, prelude::Queryable};
 
-/// Each migration is a (version, sql) pair. Version must be monotonically increasing.
-/// Append new entries here to add future migrations; never edit existing ones.
+/// Each migration is a (version, sql) pair; versions must be strictly increasing and unique across branches.
 static MIGRATIONS: &[(u32, &str)] = &[
     (1, include_str!("../migrations/V1__init.sql")),
+    (2, include_str!("../migrations/V2__user_token_last_used_at_and_password_hash_version.sql")),
 ];
 
 /// Creates the tracking table if absent, then runs every migration whose version
@@ -50,4 +50,21 @@ pub async fn run(conn: &mut Conn) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MIGRATIONS;
+
+    #[test]
+    fn migration_versions_are_strictly_increasing() {
+        for pair in MIGRATIONS.windows(2) {
+            assert!(
+                pair[0].0 < pair[1].0,
+                "duplicate or unsorted migration versions: V{} then V{}",
+                pair[0].0,
+                pair[1].0
+            );
+        }
+    }
 }
