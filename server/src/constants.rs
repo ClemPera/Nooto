@@ -7,3 +7,6 @@ pub const SESSION_TOKEN_REFRESH_AFTER_SECS: i64 = 60 * 60 * 24;
 
 /// Password hash format; see schema::User::password_hash_version.
 pub const CURRENT_PASSWORD_HASH_VERSION: u8 = 2;
+
+/// Oldest client protocol version this server accepts.
+pub const MIN_CLIENT_PROTOCOL_VERSION: u32 = 1;
