@@ -9,6 +9,11 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
 [![Beta](https://img.shields.io/badge/status-beta-orange)]()
 
+
+[<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
+     alt="Get it on F-Droid"
+     height="80">](https://f-droid.org/packages/com.nooto.app/)
+
 </div>
 
 ---
