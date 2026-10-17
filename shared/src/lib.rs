@@ -106,8 +106,7 @@ pub struct LogoutParams {
     pub token: Vec<u8>,
 }
 
-/// Bumped only on breaking changes to the wire format (paths, payloads, auth, semantics).
-/// UI-only releases must not bump this.
+/// Bumped only on breaking wire changes; UI-only releases must not bump it.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Header carrying the client's protocol version on every API request.
@@ -139,7 +138,6 @@ pub enum ProtocolCompatibility {
 }
 
 impl ServerInfo {
-    /// Returns whether `client_protocol_version` is accepted by this server.
     pub fn check_client(&self, client_protocol_version: u32) -> ProtocolCompatibility {
         if client_protocol_version < self.min_client_protocol_version {
             ProtocolCompatibility::ClientOutdated
@@ -152,9 +150,7 @@ impl ServerInfo {
 }
 
 impl ProtocolMismatch {
-    /// Builds the mismatch payload from the client's declared version and the server info.
-    /// A missing client version means a pre-versioning client. A missing server info means
-    /// the server predates the protocol check.
+    /// Builds the payload; a missing client or server predates protocol checks.
     pub fn new(client_protocol_version: Option<u32>, server: Option<ServerInfo>) -> Self {
         let client_outdated = match (&server, client_protocol_version) {
             (Some(info), Some(client)) => {

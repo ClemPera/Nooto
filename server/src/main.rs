@@ -128,8 +128,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Builds the application router. `/version` stays public and exempt from the protocol check
-/// so that outdated clients can discover the server's accepted protocol range.
+/// Builds the router; `/version` stays public so old clients can discover the protocol range.
 fn app(pool: Pool) -> anyhow::Result<Router> {
     // Rate-limited below: /login and /create_account are what an attacker would brute-force.
     let auth_governor_conf = Arc::new(
@@ -166,7 +165,6 @@ fn app(pool: Pool) -> anyhow::Result<Router> {
         .merge(api_routes))
 }
 
-/// Server metadata reported by `GET /version`.
 fn server_info() -> shared::ServerInfo {
     shared::ServerInfo {
         server_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -175,12 +173,10 @@ fn server_info() -> shared::ServerInfo {
     }
 }
 
-/// `GET /version` — returns the server version and accepted protocol range.
 async fn version() -> impl IntoResponse {
     ([(header::CACHE_CONTROL, "no-store")], Json(server_info()))
 }
 
-/// Accepts the request only if its declared client protocol version is compatible.
 fn check_client_protocol(headers: &HeaderMap) -> Result<(), shared::ProtocolMismatch> {
     let client_protocol_version = headers
         .get(shared::PROTOCOL_VERSION_HEADER)
@@ -199,7 +195,6 @@ fn check_client_protocol(headers: &HeaderMap) -> Result<(), shared::ProtocolMism
     }
 }
 
-/// Rejects API requests that don't declare a compatible protocol version.
 async fn protocol_middleware(request: AxumRequest, next: Next) -> Response {
     match check_client_protocol(request.headers()) {
         Ok(()) => next.run(request).await,
@@ -542,8 +537,6 @@ mod tests {
         assert_eq!(e.into_response().status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    // --- server_info ---
-
     #[test]
     fn server_info_matches_constants() {
         let info = server_info();
@@ -554,8 +547,6 @@ mod tests {
             constants::MIN_CLIENT_PROTOCOL_VERSION
         );
     }
-
-    // --- check_client_protocol ---
 
     fn headers_with_protocol(value: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -596,8 +587,6 @@ mod tests {
         assert!(mismatch.client_outdated);
         assert_eq!(mismatch.client_protocol_version, None);
     }
-
-    // --- Router ---
 
     fn test_app() -> Router {
         app(Pool::new("mysql://user:pass@localhost/db")).unwrap()

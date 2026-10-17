@@ -30,16 +30,12 @@ pub enum SyncStatus {
     UpgradeRequired,
 }
 
-/// Takes the workspace snapshot from the app state.
 async fn current_workspace(state: &Mutex<AppState>) -> Option<Workspace> {
     let state = state.lock().await;
     state.workspace.clone()
 }
 
-/// Handles an error returned by a sync request: a protocol mismatch emits the
-/// `version-mismatch` event and returns its payload, 401/403 clears the session,
-/// and any other failure is reported as offline or as a generic error.
-/// The caller stops the tick.
+/// Reports a failed sync request; returns the mismatch payload for protocol errors.
 async fn handle_sync_error(
     state: &Mutex<AppState>,
     handle: &AppHandle,

@@ -30,7 +30,6 @@ impl fmt::Display for ProtocolMismatchError {
 
 impl std::error::Error for ProtocolMismatchError {}
 
-/// `GET /version` — retrieves the server's protocol information.
 pub async fn fetch_server_info(instance: &str) -> Result<ServerInfo> {
     let client = reqwest::Client::new();
 
@@ -48,8 +47,7 @@ pub async fn fetch_server_info(instance: &str) -> Result<ServerInfo> {
         .context("Failed to parse server version response")
 }
 
-/// Fetches the server's protocol information and rejects incompatible servers.
-/// A server without a `/version` endpoint predates protocol checks and is rejected too.
+/// Fetches server info; a 404 means the server predates protocol checks.
 pub async fn ensure_server_compatible(instance: &str) -> Result<ServerInfo> {
     let info = match fetch_server_info(instance).await {
         Ok(info) => info,
@@ -73,8 +71,7 @@ pub async fn ensure_server_compatible(instance: &str) -> Result<ServerInfo> {
     }
 }
 
-/// Converts a `426 Upgrade Required` response into a `ProtocolMismatchError`.
-/// Non-426 responses are returned unchanged.
+/// Converts 426 responses into `ProtocolMismatchError`; others pass through.
 pub async fn reject_protocol_mismatch(response: reqwest::Response) -> Result<reqwest::Response> {
     if response.status() != reqwest::StatusCode::UPGRADE_REQUIRED {
         return Ok(response);
