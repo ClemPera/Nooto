@@ -5,8 +5,9 @@ use std::sync::Arc;
 use anyhow::Context;
 use axum::{
     Json, Router,
-    extract::{Query, State},
-    http::{HeaderMap, StatusCode},
+    extract::{Query, Request as AxumRequest, State},
+    http::{HeaderMap, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -113,6 +114,22 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to rehash legacy password hashes")?;
 
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+        .await
+        .expect("Failed to bind TCP listener");
+
+    axum::serve(
+        listener,
+        app(pool)?.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("Server error");
+
+    Ok(())
+}
+
+/// Builds the router; `/version` stays public so old clients can discover the protocol range.
+fn app(pool: Pool) -> anyhow::Result<Router> {
     // Rate-limited below: /login and /create_account are what an attacker would brute-force.
     let auth_governor_conf = Arc::new(
         GovernorConfigBuilder::default()
@@ -135,25 +152,54 @@ async fn main() -> anyhow::Result<()> {
         // .route("/data_recovery", post()) //store new recovery stuff
         .route_layer(GovernorLayer { config: auth_governor_conf });
 
-    let app = Router::new()
+    let api_routes = Router::new()
         .route("/notes", post(send_notes))
         .route("/notes", get(select_notes))
         .route("/note", get(select_note))
         .merge(auth_routes)
+        .route_layer(middleware::from_fn(protocol_middleware))
         .with_state(pool);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
-        .await
-        .expect("Failed to bind TCP listener");
+    Ok(Router::new()
+        .route("/version", get(version))
+        .merge(api_routes))
+}
 
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await
-    .expect("Server error");
+fn server_info() -> shared::ServerInfo {
+    shared::ServerInfo {
+        server_version: env!("CARGO_PKG_VERSION").to_string(),
+        protocol_version: shared::PROTOCOL_VERSION,
+        min_client_protocol_version: constants::MIN_CLIENT_PROTOCOL_VERSION,
+    }
+}
 
-    Ok(())
+async fn version() -> impl IntoResponse {
+    ([(header::CACHE_CONTROL, "no-store")], Json(server_info()))
+}
+
+fn check_client_protocol(headers: &HeaderMap) -> Result<(), shared::ProtocolMismatch> {
+    let client_protocol_version = headers
+        .get(shared::PROTOCOL_VERSION_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u32>().ok());
+
+    let server = server_info();
+
+    match client_protocol_version {
+        Some(version)
+            if server.check_client(version) == shared::ProtocolCompatibility::Compatible =>
+        {
+            Ok(())
+        }
+        _ => Err(shared::ProtocolMismatch::new(client_protocol_version, Some(server))),
+    }
+}
+
+async fn protocol_middleware(request: AxumRequest, next: Next) -> Response {
+    match check_client_protocol(request.headers()) {
+        Ok(()) => next.run(request).await,
+        Err(mismatch) => (StatusCode::UPGRADE_REQUIRED, Json(mismatch)).into_response(),
+    }
 }
 
 
@@ -413,7 +459,10 @@ async fn logout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, header};
     use axum::response::IntoResponse;
+    use tower::ServiceExt;
 
     // --- AppError constructors ---
 
@@ -486,5 +535,101 @@ mod tests {
     fn app_error_internal_into_response_has_500() {
         let e = AppError::internal(anyhow::anyhow!("internal"));
         assert_eq!(e.into_response().status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn server_info_matches_constants() {
+        let info = server_info();
+        assert_eq!(info.server_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(info.protocol_version, shared::PROTOCOL_VERSION);
+        assert_eq!(
+            info.min_client_protocol_version,
+            constants::MIN_CLIENT_PROTOCOL_VERSION
+        );
+    }
+
+    fn headers_with_protocol(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(shared::PROTOCOL_VERSION_HEADER, value.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn missing_protocol_header_is_client_outdated() {
+        let mismatch = check_client_protocol(&HeaderMap::new()).unwrap_err();
+        assert_eq!(mismatch.code, "protocol_mismatch");
+        assert!(mismatch.client_outdated);
+        assert_eq!(mismatch.client_protocol_version, None);
+    }
+
+    #[test]
+    fn matching_protocol_header_is_accepted() {
+        assert!(check_client_protocol(&headers_with_protocol("1")).is_ok());
+    }
+
+    #[test]
+    fn older_protocol_header_is_client_outdated() {
+        let mismatch = check_client_protocol(&headers_with_protocol("0")).unwrap_err();
+        assert!(mismatch.client_outdated);
+        assert_eq!(mismatch.client_protocol_version, Some(0));
+    }
+
+    #[test]
+    fn newer_protocol_header_is_server_outdated() {
+        let mismatch = check_client_protocol(&headers_with_protocol("999")).unwrap_err();
+        assert!(!mismatch.client_outdated);
+        assert_eq!(mismatch.client_protocol_version, Some(999));
+    }
+
+    #[test]
+    fn malformed_protocol_header_is_client_outdated() {
+        let mismatch = check_client_protocol(&headers_with_protocol("not-a-version")).unwrap_err();
+        assert!(mismatch.client_outdated);
+        assert_eq!(mismatch.client_protocol_version, None);
+    }
+
+    fn test_app() -> Router {
+        app(Pool::new("mysql://user:pass@localhost/db")).unwrap()
+    }
+
+    async fn body_bytes(response: Response) -> Vec<u8> {
+        to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec()
+    }
+
+    #[tokio::test]
+    async fn version_route_returns_server_info() {
+        let response = test_app()
+            .oneshot(Request::builder().uri("/version").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+
+        let info: shared::ServerInfo = serde_json::from_slice(&body_bytes(response).await).unwrap();
+        assert_eq!(info.server_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(info.protocol_version, shared::PROTOCOL_VERSION);
+        assert_eq!(
+            info.min_client_protocol_version,
+            constants::MIN_CLIENT_PROTOCOL_VERSION
+        );
+    }
+
+    #[tokio::test]
+    async fn notes_without_protocol_header_returns_426() {
+        let response = test_app()
+            .oneshot(Request::builder().uri("/notes").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+
+        let mismatch: shared::ProtocolMismatch =
+            serde_json::from_slice(&body_bytes(response).await).unwrap();
+        assert_eq!(mismatch.code, "protocol_mismatch");
+        assert!(mismatch.client_outdated);
     }
 }

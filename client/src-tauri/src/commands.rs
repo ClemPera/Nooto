@@ -27,6 +27,8 @@ pub enum ErrorKind {
     Network,
     /// The caller supplied an invalid value (bad UUID, empty name, etc.).
     InvalidInput,
+    /// The client and server protocol versions are incompatible.
+    UpgradeRequired,
 }
 
 /// Serialisable error returned to the frontend by every command.
@@ -58,7 +60,9 @@ impl CommandError {
 
 impl From<anyhow::Error> for CommandError {
     fn from(err: anyhow::Error) -> Self {
-        let kind = if err.downcast_ref::<reqwest::Error>().is_some() {
+        let kind = if err.downcast_ref::<sync::version::ProtocolMismatchError>().is_some() {
+            ErrorKind::UpgradeRequired
+        } else if err.downcast_ref::<reqwest::Error>().is_some() {
             ErrorKind::Network
         } else {
             ErrorKind::Internal
@@ -378,6 +382,10 @@ pub async fn sync_create_account(
 
     trace!("create account command received");
 
+    let instance: String = instance.context("Instance url is empty")?;
+
+    sync::version::ensure_server_compatible(&instance).await?;
+
     let state = state.lock().await;
 
     let workspace = state
@@ -389,7 +397,7 @@ pub async fn sync_create_account(
 
     trace!("create account: start creating");
 
-    sync::create_account(workspace, username, account, instance)
+    sync::create_account(workspace, username, account, Some(instance))
         .await?;
 
     debug!("account has been created");
@@ -410,14 +418,16 @@ pub async fn sync_login(
 ) -> Result<(), CommandError> {
     trace!("login command received");
 
+    let instance: String = instance.context("Instance url is empty")?;
+
+    sync::version::ensure_server_compatible(&instance).await?;
+
     let mut state = state.lock().await;
 
     let mut workspace = state
         .workspace
         .clone()
         .ok_or_else(|| CommandError::unauthorized("A workspace must be loaded before logging in"))?;
-
-    let instance: String = instance.context("Instance url is empty")?;
 
     let login_data = sync::login(username.clone(), password.clone(), instance.clone())
         .await?;

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { syncStatusEnum, useGeneral } from "../../store/general";
+import { ProtocolMismatch, syncStatusEnum, syncStatusLabel, useGeneral } from "../../store/general";
 import { useModals } from "../../store/modals";
 import { useToasts } from "../../store/toasts";
 import { listen } from "@tauri-apps/api/event";
@@ -13,16 +13,28 @@ import WorkspaceMenu from "./WorkspaceMenu";
 
 type AuthMode = "login" | "register";
 
-const SYNC_LABEL: Record<syncStatusEnum, string> = {
-  [syncStatusEnum.Synched]: "Synched",
-  [syncStatusEnum.Syncing]: "Syncing...",
-  [syncStatusEnum.Offline]: "Offline",
-  [syncStatusEnum.NotConnected]: "Not connected",
-  [syncStatusEnum.Error]: "Sync Error",
-};
+function syncLabel(status: syncStatusEnum, mismatch: ProtocolMismatch | null): string {
+  if (status !== syncStatusEnum.UpgradeRequired || !mismatch) return syncStatusLabel(status);
+  return mismatch.client_outdated ? "Update app" : "Update server";
+}
+
+function mismatchMessage(mismatch: ProtocolMismatch | null): string {
+  if (!mismatch) return "Sync paused until app and server versions match.";
+  if (mismatch.client_outdated) return "This app is too old. Update Nooto to resume syncing.";
+  if (!mismatch.server) return "This server does not support version checks. Update it to resume syncing.";
+  return `Server v${mismatch.server.server_version} is too old. Update it to resume syncing.`;
+}
 
 export default function AccountMenu() {
-  const { workspace, setWorkspace, allWorkspaces, setSyncStatus, syncStatus } = useGeneral();
+  const {
+    workspace,
+    setWorkspace,
+    allWorkspaces,
+    setSyncStatus,
+    syncStatus,
+    versionMismatch,
+    setVersionMismatch,
+  } = useGeneral();
   const { setShowLogoutWorkspaceConfirm } = useModals();
 
   const [showMenu, setShowMenu] = useState(false);
@@ -41,6 +53,12 @@ export default function AccountMenu() {
     listen<syncStatusEnum>("sync-status", (event) => {
       trace("sync status: " + event.payload);
       setSyncStatus(event.payload);
+      if (event.payload !== syncStatusEnum.UpgradeRequired) setVersionMismatch(null);
+    });
+
+    listen<ProtocolMismatch>("version-mismatch", (event) => {
+      trace("protocol mismatch: " + event.payload.code);
+      setVersionMismatch(event.payload);
     });
 
     listen("session-expired", () => {
@@ -125,8 +143,18 @@ export default function AccountMenu() {
       {/* Sync status */}
       <div className="px-2 md:px-3 py-2 flex items-center gap-2 text-xs md:text-sm">
         <div className={`w-2 h-2 rounded-full ${syncColor}`} />
-        <span className="text-slate-400">{SYNC_LABEL[syncStatus]}</span>
+        <span className={syncStatus === syncStatusEnum.UpgradeRequired ? "text-red-400" : "text-slate-400"}>
+          {syncLabel(syncStatus, versionMismatch)}
+        </span>
       </div>
+
+      {syncStatus === syncStatusEnum.UpgradeRequired && (
+        <div className="px-2 md:px-3 pb-2">
+          <p className="pl-4 text-xs text-slate-400 leading-snug">
+            {mismatchMessage(versionMismatch)}
+          </p>
+        </div>
+      )}
 
       <div className="text-white text-xs px-2">version: {versionNumber}</div>
 

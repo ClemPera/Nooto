@@ -29,9 +29,13 @@ dotenvy = "0.15"
 mysql_async = { version="0.37", features = ["chrono"] }
 rand = "0.10"
 serde = { version = "1", features = ["derive"] }
-tokio = { version="1.48", features = ["rt-multi-thread"]}
+tokio = { version="1.48", features = ["rt-multi-thread", "macros"]}
 hex = "0.4"
 anyhow = "1.0"
 subtle = "2.6"
 tower_governor = "0.7"
 argon2 = { version = "0.5", features = ["std"] }
+
+[dev-dependencies]
+serde_json = "1"
+tower = { version = "0.5", features = ["util"] }

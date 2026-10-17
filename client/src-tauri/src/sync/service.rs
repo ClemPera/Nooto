@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
-use shared::{SelectNotesParams, SentNotes};
+use shared::{ProtocolMismatch, SelectNotesParams, SentNotes};
+use std::time::Instant;
 use tokio::{sync::Mutex, time::Duration};
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -13,6 +14,11 @@ use crate::{
     sync,
 };
 
+/// How often the server protocol version is checked during normal sync.
+const VERSION_CHECK_INTERVAL: Duration = Duration::from_secs(300);
+/// How often the server protocol version is rechecked while sync is blocked.
+const VERSION_RECHECK_INTERVAL: Duration = Duration::from_secs(30);
+
 /// Sync state emitted to the frontend via the `sync-status` Tauri event.
 #[derive(Clone, Serialize)]
 pub enum SyncStatus {
@@ -21,6 +27,39 @@ pub enum SyncStatus {
     Error,
     Offline,
     NotConnected,
+    UpgradeRequired,
+}
+
+async fn current_workspace(state: &Mutex<AppState>) -> Option<Workspace> {
+    let state = state.lock().await;
+    state.workspace.clone()
+}
+
+/// Reports a failed sync request; returns the mismatch payload for protocol errors.
+async fn handle_sync_error(
+    state: &Mutex<AppState>,
+    handle: &AppHandle,
+    e: &anyhow::Error,
+) -> Option<ProtocolMismatch> {
+    if let Some(mismatch) = e.downcast_ref::<sync::version::ProtocolMismatchError>() {
+        emit(handle, "version-mismatch", mismatch.0.clone());
+        emit(handle, "sync-status", SyncStatus::UpgradeRequired);
+        return Some(mismatch.0.clone());
+    }
+
+    if clear_session_if_unauthorized(state, handle, e).await {
+        return None;
+    }
+
+    if e.downcast_ref::<reqwest::Error>().map_or(false, |e| e.is_connect()) {
+        emit(handle, "sync-status", SyncStatus::Offline);
+        info!("Couldn't connect to server");
+    } else {
+        emit(handle, "sync-status", SyncStatus::Error);
+        error!("{e:#}");
+    }
+
+    None
 }
 
 /// Clears stored credentials and notifies the frontend when the server rejects the session.
@@ -55,15 +94,66 @@ async fn clear_session_if_unauthorized(
 pub async fn run(handle: AppHandle) {
     let state = handle.state::<Mutex<AppState>>();
 
+    let mut checked_instance: Option<String> = None;
+    let mut last_version_check: Option<Instant> = None;
+    let mut blocked: Option<ProtocolMismatch> = None;
+
     loop {
         'sync: {
-            let workspace = {
-                let state = state.lock().await;
-                state.workspace.clone()
-            };
+            let workspace = current_workspace(&state).await;
 
             if let Some(workspace) = workspace {
-                if workspace.token.is_some() && workspace.instance.is_some() {
+                if let (Some(_), Some(instance)) = (&workspace.token, &workspace.instance) {
+                    let now = Instant::now();
+
+                    if blocked.is_some() {
+                        emit(&handle, "sync-status", SyncStatus::UpgradeRequired);
+                    }
+
+                    let instance_changed = checked_instance.as_deref() != Some(instance.as_str());
+                    let recheck_interval = if blocked.is_some() {
+                        VERSION_RECHECK_INTERVAL
+                    } else {
+                        VERSION_CHECK_INTERVAL
+                    };
+
+                    let check_due = instance_changed
+                        || last_version_check
+                            .map_or(true, |at| now.duration_since(at) >= recheck_interval);
+
+                    if check_due {
+                        match sync::version::ensure_server_compatible(instance).await {
+                            Ok(_) => {
+                                checked_instance = Some(instance.clone());
+                                last_version_check = Some(Instant::now());
+
+                                if blocked.take().is_some() {
+                                    info!("Server protocol check passed, resuming sync");
+                                }
+                            }
+                            Err(e) => {
+                                if let Some(mismatch) = e.downcast_ref::<sync::version::ProtocolMismatchError>() {
+                                    checked_instance = Some(instance.clone());
+                                    last_version_check = Some(Instant::now());
+                                    emit(&handle, "version-mismatch", mismatch.0.clone());
+                                    emit(&handle, "sync-status", SyncStatus::UpgradeRequired);
+                                    blocked = Some(mismatch.0.clone());
+                                } else if blocked.is_some() {
+                                    last_version_check = Some(Instant::now());
+                                    error!("Protocol recheck failed: {e:#}");
+                                } else {
+                                    let _ = handle_sync_error(&state, &handle, &e).await;
+                                }
+
+                                break 'sync;
+                            }
+                        }
+                    }
+
+                    if blocked.is_some() {
+                        break 'sync;
+                    }
+
                     let current_last_seen = workspace.last_sync_at;
 
                     match receive_latest_notes(&state, workspace.clone(), current_last_seen, &handle).await {
@@ -77,15 +167,9 @@ pub async fn run(handle: AppHandle) {
                             }
                         }
                         Err(e) => {
-                            if clear_session_if_unauthorized(&state, &handle, &e).await {
-                                break 'sync;
-                            }
-                            if e.downcast_ref::<reqwest::Error>().map_or(false, |e| e.is_connect()) {
-                                emit(&handle, "sync-status", SyncStatus::Offline);
-                                info!("Couldn't connect to server");
-                            } else {
-                                emit(&handle, "sync-status", SyncStatus::Error);
-                                error!("{e:#}");
+                            if let Some(mismatch) = handle_sync_error(&state, &handle, &e).await {
+                                blocked = Some(mismatch);
+                                last_version_check = Some(Instant::now());
                             }
                             break 'sync;
                         }
@@ -102,15 +186,9 @@ pub async fn run(handle: AppHandle) {
                             }
                         }
                         Err(e) => {
-                            if clear_session_if_unauthorized(&state, &handle, &e).await {
-                                break 'sync;
-                            }
-                            if e.downcast_ref::<reqwest::Error>().map_or(false, |e| e.is_connect()) {
-                                emit(&handle, "sync-status", SyncStatus::Offline);
-                                info!("Couldn't connect to server");
-                            } else {
-                                emit(&handle, "sync-status", SyncStatus::Error);
-                                error!("{e:#}");
+                            if let Some(mismatch) = handle_sync_error(&state, &handle, &e).await {
+                                blocked = Some(mismatch);
+                                last_version_check = Some(Instant::now());
                             }
                             break 'sync;
                         }
