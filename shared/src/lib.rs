@@ -105,3 +105,121 @@ pub struct LogoutParams {
     pub username: String,
     pub token: Vec<u8>,
 }
+
+/// Bumped only on breaking changes to the wire format (paths, payloads, auth, semantics).
+/// UI-only releases must not bump this.
+pub const PROTOCOL_VERSION: u32 = 1;
+
+/// Header carrying the client's protocol version on every API request.
+pub const PROTOCOL_VERSION_HEADER: &str = "x-nooto-protocol-version";
+
+/// Server information returned by `GET /version`.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ServerInfo {
+    pub server_version: String,
+    pub protocol_version: u32,
+    pub min_client_protocol_version: u32,
+}
+
+/// Returned by the server when the client's protocol version is not accepted.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ProtocolMismatch {
+    pub code: String,
+    pub client_outdated: bool,
+    pub client_protocol_version: Option<u32>,
+    pub server: Option<ServerInfo>,
+}
+
+/// Result of comparing a client protocol version against a server's accepted range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtocolCompatibility {
+    Compatible,
+    ClientOutdated,
+    ServerOutdated,
+}
+
+impl ServerInfo {
+    /// Returns whether `client_protocol_version` is accepted by this server.
+    pub fn check_client(&self, client_protocol_version: u32) -> ProtocolCompatibility {
+        if client_protocol_version < self.min_client_protocol_version {
+            ProtocolCompatibility::ClientOutdated
+        } else if client_protocol_version > self.protocol_version {
+            ProtocolCompatibility::ServerOutdated
+        } else {
+            ProtocolCompatibility::Compatible
+        }
+    }
+}
+
+impl ProtocolMismatch {
+    /// Builds the mismatch payload from the client's declared version and the server info.
+    /// A missing client version means a pre-versioning client. A missing server info means
+    /// the server predates the protocol check.
+    pub fn new(client_protocol_version: Option<u32>, server: Option<ServerInfo>) -> Self {
+        let client_outdated = match (&server, client_protocol_version) {
+            (Some(info), Some(client)) => {
+                info.check_client(client) == ProtocolCompatibility::ClientOutdated
+            }
+            (Some(_), None) => true,
+            (None, _) => false,
+        };
+
+        ProtocolMismatch {
+            code: "protocol_mismatch".to_string(),
+            client_outdated,
+            client_protocol_version,
+            server,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn server_info(protocol_version: u32, min_client_protocol_version: u32) -> ServerInfo {
+        ServerInfo {
+            server_version: "0.3.0".to_string(),
+            protocol_version,
+            min_client_protocol_version,
+        }
+    }
+
+    #[test]
+    fn client_below_minimum_is_outdated() {
+        let info = server_info(2, 2);
+        assert_eq!(info.check_client(1), ProtocolCompatibility::ClientOutdated);
+    }
+
+    #[test]
+    fn client_above_server_is_server_outdated() {
+        let info = server_info(1, 1);
+        assert_eq!(info.check_client(2), ProtocolCompatibility::ServerOutdated);
+    }
+
+    #[test]
+    fn client_in_accepted_range_is_compatible() {
+        let info = server_info(2, 1);
+        assert_eq!(info.check_client(1), ProtocolCompatibility::Compatible);
+        assert_eq!(info.check_client(2), ProtocolCompatibility::Compatible);
+    }
+
+    #[test]
+    fn missing_client_version_marks_client_outdated() {
+        let mismatch = ProtocolMismatch::new(None, Some(server_info(1, 1)));
+        assert!(mismatch.client_outdated);
+    }
+
+    #[test]
+    fn newer_client_does_not_mark_client_outdated() {
+        let mismatch = ProtocolMismatch::new(Some(2), Some(server_info(1, 1)));
+        assert!(!mismatch.client_outdated);
+    }
+
+    #[test]
+    fn missing_server_does_not_mark_client_outdated() {
+        let mismatch = ProtocolMismatch::new(Some(1), None);
+        assert!(!mismatch.client_outdated);
+        assert_eq!(mismatch.code, "protocol_mismatch");
+    }
+}
