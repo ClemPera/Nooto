@@ -100,3 +100,41 @@ pub struct Login {
     pub mek_password_nonce: Vec<u8>,
     pub token: Vec<u8>,
 }
+
+/// An encrypted image referenced by a note's content, stored and synced independently
+/// of the note itself.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct Image {
+    pub uuid: String,
+    pub note_uuid: String,
+    pub content: Vec<u8>,
+    pub nonce: Vec<u8>,
+}
+
+/// Payload for `POST /image` — uploads a single encrypted image. Images are write-once,
+/// so unlike notes there's no conflict/force handling.
+#[derive(Deserialize, Serialize, Debug)]
+pub struct SendImage {
+    pub image: Image,
+    pub token: Vec<u8>,
+    pub username: String,
+}
+
+/// Query parameters for `GET /image` and `DELETE /image` — both identify a single image
+/// by UUID and need nothing else, so they share this shape.
+#[derive(Deserialize, Serialize, Debug)]
+pub struct SelectImageParams {
+    pub username: String,
+    pub token: String,
+    pub uuid: String,
+}
+
+/// Query parameters for `GET /images` — lists every image UUID currently linked to a note.
+/// Used by clients to reconcile their local cache against what the server actually has,
+/// since there's no other way to learn that an image was deleted on another device.
+#[derive(Deserialize, Serialize, Debug)]
+pub struct SelectNoteImagesParams {
+    pub username: String,
+    pub token: String,
+    pub note_uuid: String,
+}

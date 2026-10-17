@@ -141,6 +141,117 @@ impl Note {
     }
 }
 
+/// Server-side image row as stored in the `image` table. Images are write-once — there's
+/// no `update`, only `insert` and `select`.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct Image {
+    pub uuid: String,
+    pub id_user: Option<u32>,
+    pub id_note: String,
+    pub content: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub created_at: i64,
+}
+
+impl FromRow for Image {
+    fn from_row_opt(row: Row) -> Result<Self, FromRowError> {
+        Ok(Image {
+            uuid: row.get(0).ok_or(FromRowError(row.clone()))?,
+            id_user: row.get(1).ok_or(FromRowError(row.clone()))?,
+            id_note: row.get(2).ok_or(FromRowError(row.clone()))?,
+            content: row.get(3).ok_or(FromRowError(row.clone()))?,
+            nonce: row.get(4).ok_or(FromRowError(row.clone()))?,
+            created_at: row.get(5).ok_or(FromRowError(row.clone()))?,
+        })
+    }
+}
+
+impl From<shared::Image> for Image {
+    fn from(image: shared::Image) -> Self {
+        Image {
+            uuid: image.uuid,
+            id_user: None,
+            id_note: image.note_uuid,
+            content: image.content,
+            nonce: image.nonce,
+            created_at: 0,
+        }
+    }
+}
+
+impl Into<shared::Image> for Image {
+    fn into(self) -> shared::Image {
+        shared::Image {
+            uuid: self.uuid,
+            note_uuid: self.id_note,
+            content: self.content,
+            nonce: self.nonce,
+        }
+    }
+}
+
+impl Image {
+    /// Fetches a single image by UUID, scoped to the owning user. Returns `None` if not found.
+    pub async fn select(conn: &mut Conn, id_user: u32, uuid: String) -> Result<Option<Self>> {
+        conn.exec_first(
+            "SELECT * FROM image WHERE id_user = :id_user AND uuid = :uuid",
+            params!(
+                "id_user" => id_user,
+                "uuid" => uuid
+            ),
+        )
+        .await
+        .context("Failed to select image")
+    }
+
+    /// Inserts a new image row. Caller must set `id_user` and `created_at` before calling.
+    pub async fn insert(&self, conn: &mut Conn) -> Result<()> {
+        conn.exec_drop(
+            "INSERT INTO image (uuid, id_user, id_note, content, nonce, created_at) \
+            VALUES (:uuid, :id_user, :id_note, :content, :nonce, :created_at)",
+            params!(
+                "uuid" => &self.uuid,
+                "id_user" => &self.id_user,
+                "id_note" => &self.id_note,
+                "content" => &self.content,
+                "nonce" => &self.nonce,
+                "created_at" => &self.created_at,
+            ),
+        )
+        .await
+        .context("Failed to insert image")
+    }
+
+    /// Returns every image linked to `note_uuid`, scoped to the owning user. Used by
+    /// clients to reconcile their local attachment cache with what the server actually
+    /// has, since deletions aren't otherwise pushed to other devices.
+    pub async fn select_by_note(conn: &mut Conn, id_user: u32, note_uuid: String) -> Result<Vec<Self>> {
+        conn.exec(
+            "SELECT * FROM image WHERE id_user = :id_user AND id_note = :id_note",
+            params!(
+                "id_user" => id_user,
+                "id_note" => note_uuid
+            ),
+        )
+        .await
+        .context("Failed to select images for note")
+    }
+
+    /// Deletes an image by UUID, scoped to the owning user. A no-op if it doesn't exist
+    /// (or belongs to someone else), so this is safe to call idempotently.
+    pub async fn delete(conn: &mut Conn, id_user: u32, uuid: String) -> Result<()> {
+        conn.exec_drop(
+            "DELETE FROM image WHERE id_user = :id_user AND uuid = :uuid",
+            params!(
+                "id_user" => id_user,
+                "uuid" => uuid
+            ),
+        )
+        .await
+        .context("Failed to delete image")
+    }
+}
+
 /// Server-side user row as stored in the `user` table.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct User {
@@ -310,6 +421,15 @@ mod tests {
         }
     }
 
+    fn sample_shared_image() -> shared::Image {
+        shared::Image {
+            uuid: "660e8400-e29b-41d4-a716-446655440000".to_string(),
+            note_uuid: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            content: vec![1, 2, 3, 4],
+            nonce: vec![5, 6, 7, 8],
+        }
+    }
+
     fn sample_shared_user() -> shared::User {
         shared::User {
             id: Some(42),
@@ -390,6 +510,37 @@ mod tests {
         assert_eq!(roundtripped.metadata_nonce, original.metadata_nonce);
         assert_eq!(roundtripped.updated_at, original.updated_at);
         assert_eq!(roundtripped.deleted, original.deleted);
+    }
+
+    // --- Image conversions ---
+
+    #[test]
+    fn image_from_shared_preserves_fields() {
+        let shared = sample_shared_image();
+        let image = Image::from(shared.clone());
+
+        assert_eq!(image.uuid, shared.uuid);
+        assert_eq!(image.id_note, shared.note_uuid);
+        assert_eq!(image.content, shared.content);
+        assert_eq!(image.nonce, shared.nonce);
+    }
+
+    #[test]
+    fn image_from_shared_sets_id_user_to_none() {
+        let image = Image::from(sample_shared_image());
+        assert!(image.id_user.is_none());
+    }
+
+    #[test]
+    fn image_roundtrip_from_shared_and_back() {
+        let original = sample_shared_image();
+        let server_image = Image::from(original.clone());
+        let roundtripped: shared::Image = server_image.into();
+
+        assert_eq!(roundtripped.uuid, original.uuid);
+        assert_eq!(roundtripped.note_uuid, original.note_uuid);
+        assert_eq!(roundtripped.content, original.content);
+        assert_eq!(roundtripped.nonce, original.nonce);
     }
 
     // --- User conversion ---

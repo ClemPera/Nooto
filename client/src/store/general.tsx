@@ -8,6 +8,7 @@ export enum syncStatusEnum {
   Error = "Error",
   Offline = "Offline",
   NotConnected = "NotConnected",
+  ServerOutdated = "ServerOutdated",
 }
 
 type Store = {

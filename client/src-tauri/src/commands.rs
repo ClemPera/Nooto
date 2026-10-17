@@ -702,6 +702,201 @@ pub async fn handle_conflict(
     Ok(())
 }
 
+/// Returns the UUIDs of every image belonging to `note_id` - the note's attachment
+/// library, which can include images no longer referenced in the note's text. Also
+/// reconciles against the server: an image deleted on another device is never pushed
+/// here, so this is the only point where a stale local copy gets noticed and pruned.
+/// Best-effort - falls back to the local list as-is if the server can't be reached.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn list_note_images(
+    state: State<'_, Mutex<AppState>>,
+    note_id: String,
+) -> Result<Vec<String>, CommandError> {
+    let (workspace, images) = {
+        let state = state.lock().await;
+        let conn = state.database.lock().await;
+
+        let workspace = state.workspace.clone();
+        let images = db::schema::Image::select_by_note(&conn, note_id.clone())?;
+
+        (workspace, images)
+    };
+
+    let server_uuids = match workspace.as_ref().and_then(|w| {
+        Some((w.username.clone()?, w.token.clone()?, w.instance.clone()?))
+    }) {
+        Some((username, token, instance)) => {
+            let params = shared::SelectNoteImagesParams {
+                username,
+                token: hex::encode(token),
+                note_uuid: note_id,
+            };
+            sync::operations::select_note_images(params, instance).await.ok()
+        }
+        None => None,
+    };
+
+    let Some(server_uuids) = server_uuids else {
+        return Ok(images.into_iter().map(|image| image.uuid).collect());
+    };
+
+    let mut kept = Vec::with_capacity(images.len());
+    for image in images {
+        // Only prune images we know were actually uploaded - one that's still pending
+        // upload just hasn't reached the server yet, that's not the same as deleted.
+        if image.synched && !server_uuids.contains(&image.uuid) {
+            let state = state.lock().await;
+            let conn = state.database.lock().await;
+            db::schema::Image::delete(&conn, image.uuid.clone())?;
+            continue;
+        }
+        kept.push(image.uuid);
+    }
+
+    Ok(kept)
+}
+
+/// Encrypts `bytes` and stores them locally as an unsynced image linked to `note_id`.
+/// Returns the new image's UUID, which the frontend embeds in the note's markdown as a
+/// `nooto-image:<uuid>` reference instead of the raw bytes.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn insert_image(
+    state: State<'_, Mutex<AppState>>,
+    note_id: String,
+    bytes: Vec<u8>,
+) -> Result<String, CommandError> {
+    let state = state.lock().await;
+    let conn = state.database.lock().await;
+
+    let workspace = state
+        .workspace
+        .clone()
+        .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
+
+    let uuid = db::operations::insert_image(
+        &conn,
+        workspace.id,
+        note_id,
+        &bytes,
+        workspace.master_encryption_key,
+    )?;
+
+    Ok(uuid)
+}
+
+/// Returns an image's decrypted bytes. Checks the local cache first, falling back to the
+/// server (and caching the result locally) if the image was synced from another device.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_image(
+    state: State<'_, Mutex<AppState>>,
+    uuid: String,
+) -> Result<Vec<u8>, CommandError> {
+    let (workspace, local) = {
+        let state = state.lock().await;
+        let conn = state.database.lock().await;
+
+        let workspace = state
+            .workspace
+            .clone()
+            .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
+
+        let local = db::operations::get_local_image(&conn, uuid.clone(), workspace.master_encryption_key)?;
+
+        (workspace, local)
+    };
+
+    if let Some(plaintext) = local {
+        return Ok(plaintext);
+    }
+
+    let username = workspace
+        .username
+        .clone()
+        .ok_or_else(|| CommandError::unauthorized("Workspace is not connected to a server"))?;
+    let token = workspace
+        .token
+        .clone()
+        .ok_or_else(|| CommandError::unauthorized("Workspace is not connected to a server"))?;
+    let instance = workspace
+        .instance
+        .clone()
+        .ok_or_else(|| CommandError::unauthorized("Workspace is not connected to a server"))?;
+
+    let params = shared::SelectImageParams { username, token: hex::encode(token), uuid: uuid.clone() };
+    let image = sync::operations::select_image(params, instance).await?;
+
+    let plaintext = crypt::decrypt_data(&image.content, &image.nonce, &workspace.master_encryption_key)?;
+
+    let state = state.lock().await;
+    let conn = state.database.lock().await;
+    db::operations::cache_remote_image(&conn, workspace.id, image)?;
+
+    Ok(plaintext)
+}
+
+/// Deletes an image, locally and (if it was ever uploaded) on the server. An image that
+/// was never synced is deleted purely locally, so this works offline for unsynced images;
+/// a synced image still requires the server call to succeed, so nothing is silently orphaned.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn delete_image(state: State<'_, Mutex<AppState>>, uuid: String) -> Result<(), CommandError> {
+    let (workspace, needs_server_delete) = {
+        let state = state.lock().await;
+        let conn = state.database.lock().await;
+
+        let workspace = state
+            .workspace
+            .clone()
+            .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
+
+        // If it isn't cached locally at all, we don't know whether it was ever synced, so
+        // err on the side of trying the server delete too.
+        let needs_server_delete = db::schema::Image::select(&conn, uuid.clone())?
+            .map_or(true, |image| image.synched);
+
+        (workspace, needs_server_delete)
+    };
+
+    if needs_server_delete {
+        if let (Some(username), Some(token), Some(instance)) =
+            (workspace.username.clone(), workspace.token.clone(), workspace.instance.clone())
+        {
+            let params = shared::SelectImageParams { username, token: hex::encode(token), uuid: uuid.clone() };
+            sync::operations::delete_image(params, instance).await?;
+        }
+    }
+
+    let state = state.lock().await;
+    let conn = state.database.lock().await;
+    db::schema::Image::delete(&conn, uuid)?;
+
+    Ok(())
+}
+
+const MAX_DROPPED_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+
+/// Reads and size-checks a local image file. Kept separate from the command wrapper so it's testable without a Tauri runtime.
+fn read_image_file(path: &str) -> Result<Vec<u8>, CommandError> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|e| CommandError::invalid_input(format!("Cannot read '{path}': {e}")))?;
+
+    if !metadata.is_file() {
+        return Err(CommandError::invalid_input(format!("'{path}' is not a file")));
+    }
+    if metadata.len() > MAX_DROPPED_IMAGE_BYTES {
+        return Err(CommandError::invalid_input("Image is too large (max 20 MB)"));
+    }
+
+    std::fs::read(path).map_err(|e| CommandError::invalid_input(format!("Cannot read '{path}': {e}")))
+}
+
+/// Reads a dropped image's raw bytes from disk. WebKitGTK doesn't expose OS file drops
+/// through the browser's File API, only a `file://` path, so the frontend resolves that
+/// path and reads the bytes through this command instead.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn read_dropped_image(path: String) -> Result<Vec<u8>, CommandError> {
+    read_image_file(&path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -726,6 +921,46 @@ mod tests {
             last_sync_at: 0,
             latest_note_id: None,
         }
+    }
+
+    fn unique_temp_path(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("nooto-test-{nanos}-{name}"))
+    }
+
+    // --- read_image_file ---
+
+    #[test]
+    fn read_image_file_returns_bytes_for_existing_file() {
+        let path = unique_temp_path("small.png");
+        std::fs::write(&path, b"fake-image-bytes").unwrap();
+
+        let result = read_image_file(path.to_str().unwrap());
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(result.unwrap(), b"fake-image-bytes".to_vec());
+    }
+
+    #[test]
+    fn read_image_file_rejects_missing_file() {
+        let result = read_image_file("/nonexistent/nooto-test-path.png");
+        assert!(matches!(result, Err(CommandError { kind: ErrorKind::InvalidInput, .. })));
+    }
+
+    #[test]
+    fn read_image_file_rejects_oversized_file() {
+        let path = unique_temp_path("big.png");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(MAX_DROPPED_IMAGE_BYTES + 1).unwrap();
+        drop(file);
+
+        let result = read_image_file(path.to_str().unwrap());
+        std::fs::remove_file(&path).ok();
+
+        assert!(matches!(result, Err(CommandError { kind: ErrorKind::InvalidInput, .. })));
     }
 
     // --- CommandError constructors ---

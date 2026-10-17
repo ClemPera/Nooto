@@ -18,6 +18,7 @@ const SYNC_LABEL: Record<syncStatusEnum, string> = {
   [syncStatusEnum.Offline]: "Offline",
   [syncStatusEnum.NotConnected]: "Not connected",
   [syncStatusEnum.Error]: "Sync Error",
+  [syncStatusEnum.ServerOutdated]: "Server needs an update",
 };
 
 export default function AccountMenu() {
@@ -111,6 +112,7 @@ export default function AccountMenu() {
   const syncColor =
     syncStatus === syncStatusEnum.Synched ? "bg-green-500" :
     syncStatus === syncStatusEnum.Syncing ? "bg-yellow-500 animate-pulse" :
+    syncStatus === syncStatusEnum.ServerOutdated ? "bg-amber-500" :
     "bg-red-500";
 
   return (

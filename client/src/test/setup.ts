@@ -2,7 +2,7 @@ import "@testing-library/jest-dom";
 import { vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(),
+  invoke: vi.fn(() => Promise.resolve(undefined)),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -16,6 +16,14 @@ vi.mock("@tauri-apps/plugin-log", () => ({
   info: vi.fn(),
   debug: vi.fn(),
   trace: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  readFile: vi.fn(),
 }));
 
 // jsdom has no layout engine, ProseMirror calls getClientRects/getBoundingClientRect when
