@@ -10,7 +10,10 @@ use tauri_plugin_log::log::{debug, error, info};
 use crate::{
     AppState, commands,
     crypt::{self, NoteData},
-    db::{self, schema::{Note, Workspace}},
+    db::{
+        self,
+        schema::{Note, Workspace},
+    },
     sync,
 };
 
@@ -31,11 +34,7 @@ pub enum SyncStatus {
 }
 
 /// Reports a failed sync request; return true if something is blocking
-async fn handle_sync_error(
-    state: &Mutex<AppState>,
-    handle: &AppHandle,
-    e: &anyhow::Error,
-) -> bool {
+async fn handle_sync_error(state: &Mutex<AppState>, handle: &AppHandle, e: &anyhow::Error) -> bool {
     if let Some(mismatch) = e.downcast_ref::<ProtocolMismatch>() {
         emit(handle, "version-mismatch", mismatch.clone());
         emit(handle, "sync-status", SyncStatus::UpgradeRequired);
@@ -46,7 +45,9 @@ async fn handle_sync_error(
         return false;
     }
 
-    if e.downcast_ref::<reqwest::Error>().map_or(false, |e| e.is_connect()) {
+    if e.downcast_ref::<reqwest::Error>()
+        .map_or(false, |e| e.is_connect())
+    {
         emit(handle, "sync-status", SyncStatus::Offline);
         info!("Couldn't connect to server");
     } else {
@@ -64,7 +65,9 @@ async fn clear_session_if_unauthorized(
     handle: &AppHandle,
     e: &anyhow::Error,
 ) -> bool {
-    let status = e.downcast_ref::<reqwest::Error>().and_then(reqwest::Error::status);
+    let status = e
+        .downcast_ref::<reqwest::Error>()
+        .and_then(reqwest::Error::status);
 
     if !matches!(
         status,
@@ -154,10 +157,19 @@ pub async fn run(handle: AppHandle) {
 
                     let current_last_seen = workspace.last_sync_at;
 
-                    match receive_latest_notes(&state, workspace.clone(), current_last_seen, &handle).await {
+                    match receive_latest_notes(
+                        &state,
+                        workspace.clone(),
+                        current_last_seen,
+                        &handle,
+                    )
+                    .await
+                    {
                         Ok(max_ts) => {
                             if let Some(ts) = max_ts {
-                                if let Err(e) = update_last_sync(&state, workspace.clone(), ts).await {
+                                if let Err(e) =
+                                    update_last_sync(&state, workspace.clone(), ts).await
+                                {
                                     error!("{e:#}");
                                     emit(&handle, "sync-status", SyncStatus::Error);
                                     break 'sync;
@@ -176,7 +188,9 @@ pub async fn run(handle: AppHandle) {
                     match send_latest_notes(&state, workspace.clone(), &handle).await {
                         Ok(max_ts) => {
                             if let Some(ts) = max_ts {
-                                if let Err(e) = update_last_sync(&state, workspace.clone(), ts).await {
+                                if let Err(e) =
+                                    update_last_sync(&state, workspace.clone(), ts).await
+                                {
                                     error!("{e:#}");
                                     emit(&handle, "sync-status", SyncStatus::Error);
                                     break 'sync;
@@ -221,12 +235,22 @@ pub async fn receive_latest_notes(
     let token = workspace.token.clone().context("Workspace has no token")?;
 
     let params = SelectNotesParams {
-        username: workspace.username.clone().context("Workspace has no username")?,
+        username: workspace
+            .username
+            .clone()
+            .context("Workspace has no username")?,
         updated_at: last_seen,
     };
 
-    let notes = sync::operations::select_notes(params, &token, workspace.instance.clone().context("Workspace has no instance")?)
-        .await?;
+    let notes = sync::operations::select_notes(
+        params,
+        &token,
+        workspace
+            .instance
+            .clone()
+            .context("Workspace has no instance")?,
+    )
+    .await?;
 
     if notes.is_empty() {
         return Ok(None);
@@ -243,11 +267,15 @@ pub async fn receive_latest_notes(
         let mut note = db::schema::Note::from(note);
         note.id_workspace = Some(workspace.id);
 
-        match Note::select(&conn, note.uuid.clone()).context("Failed to look up note in database")? {
+        match Note::select(&conn, note.uuid.clone())
+            .context("Failed to look up note in database")?
+        {
             Some(sn) => {
                 if note.updated_at > sn.updated_at {
                     match sn.synched {
-                        true => note.update(&conn).context("Failed to update received note")?,
+                        true => note
+                            .update(&conn)
+                            .context("Failed to update received note")?,
                         false => {
                             info!("Note {:?} is in conflict (client side)", note.uuid);
 
@@ -257,7 +285,9 @@ pub async fn receive_latest_notes(
                     }
                 }
             }
-            None => note.insert(&conn).context("Failed to insert received note")?,
+            None => note
+                .insert(&conn)
+                .context("Failed to insert received note")?,
         }
     }
 
@@ -301,7 +331,10 @@ pub async fn send_latest_notes(
         emit(handle, "sync-status", SyncStatus::Syncing);
 
         let sent_notes = SentNotes {
-            username: workspace.username.clone().context("Workspace has no username")?,
+            username: workspace
+                .username
+                .clone()
+                .context("Workspace has no username")?,
             notes: unsynced_notes.into_iter().map(|n| n.into()).collect(),
             token: workspace.token.clone().context("Workspace has no token")?,
             force: false,
@@ -309,7 +342,10 @@ pub async fn send_latest_notes(
 
         let results = sync::operations::send_notes(
             sent_notes,
-            workspace.instance.clone().context("Workspace has no instance")?,
+            workspace
+                .instance
+                .clone()
+                .context("Workspace has no instance")?,
         )
         .await?;
 
@@ -323,7 +359,8 @@ pub async fn send_latest_notes(
                         .context("Failed to find sent note in database")?
                         .ok_or_else(|| anyhow::anyhow!("Sent note '{}' not found", result.uuid))?;
                     note.synched = true;
-                    note.update(&conn).context("Failed to mark note as synched")?;
+                    note.update(&conn)
+                        .context("Failed to mark note as synched")?;
 
                     max_server_received_at = Some(
                         max_server_received_at
@@ -331,7 +368,10 @@ pub async fn send_latest_notes(
                     );
                 }
                 shared::NoteStatus::Conflict(conflicted_note) => {
-                    info!("Note {:?} is in conflict (server side)", conflicted_note.uuid);
+                    info!(
+                        "Note {:?} is in conflict (server side)",
+                        conflicted_note.uuid
+                    );
                     let note = db::schema::Note::from(conflicted_note);
                     let decrypted_note = decrypt_note_for_emit(&note, &workspace)?;
                     emit(handle, "conflict", decrypted_note);
@@ -369,10 +409,15 @@ pub async fn update_last_sync(
 
 /// Decrypts a note into a frontend-ready NoteResponse, used before emitting conflict events.
 fn decrypt_note_for_emit(note: &Note, workspace: &Workspace) -> Result<commands::NoteResponse> {
-    let content_plaintext = crypt::decrypt_data(&note.content, &note.nonce, &workspace.master_encryption_key)
-        .context("Failed to decrypt conflicted note content")?;
-    let metadata_plaintext = crypt::decrypt_data(&note.metadata, &note.metadata_nonce, &workspace.master_encryption_key)
-        .context("Failed to decrypt conflicted note metadata")?;
+    let content_plaintext =
+        crypt::decrypt_data(&note.content, &note.nonce, &workspace.master_encryption_key)
+            .context("Failed to decrypt conflicted note content")?;
+    let metadata_plaintext = crypt::decrypt_data(
+        &note.metadata,
+        &note.metadata_nonce,
+        &workspace.master_encryption_key,
+    )
+    .context("Failed to decrypt conflicted note metadata")?;
     let metadata: crypt::NoteMetadata = serde_json::from_slice(&metadata_plaintext)
         .context("Failed to parse conflicted note metadata")?;
 
