@@ -30,20 +30,20 @@ pub enum SyncStatus {
     UpgradeRequired,
 }
 
-/// Reports a failed sync request
+/// Reports a failed sync request; return true if something is blocking
 async fn handle_sync_error(
     state: &Mutex<AppState>,
     handle: &AppHandle,
     e: &anyhow::Error,
-) -> Option<ProtocolMismatch> {
+) -> bool {
     if let Some(mismatch) = e.downcast_ref::<ProtocolMismatch>() {
         emit(handle, "version-mismatch", mismatch.clone());
         emit(handle, "sync-status", SyncStatus::UpgradeRequired);
-        return Some(mismatch.clone());
+        return true;
     }
 
     if clear_session_if_unauthorized(state, handle, e).await {
-        return None;
+        return false;
     }
 
     if e.downcast_ref::<reqwest::Error>().map_or(false, |e| e.is_connect()) {
@@ -54,7 +54,7 @@ async fn handle_sync_error(
         error!("{e:#}");
     }
 
-    None
+    false
 }
 
 /// Clears stored credentials and notifies the frontend when the server rejects the session.
@@ -91,7 +91,7 @@ pub async fn run(handle: AppHandle) {
 
     let mut checked_instance: Option<String> = None;
     let mut last_version_check: Option<Instant> = None;
-    let mut blocked: Option<ProtocolMismatch> = None;
+    let mut blocked: bool = false;
 
     loop {
         'sync: {
@@ -104,12 +104,12 @@ pub async fn run(handle: AppHandle) {
                 if let (Some(_), Some(instance)) = (&workspace.token, &workspace.instance) {
                     let now = Instant::now();
 
-                    if blocked.is_some() {
+                    if blocked {
                         emit(&handle, "sync-status", SyncStatus::UpgradeRequired);
                     }
 
                     let instance_changed = checked_instance.as_deref() != Some(instance.as_str());
-                    let recheck_interval = if blocked.is_some() {
+                    let recheck_interval = if blocked {
                         VERSION_RECHECK_INTERVAL
                     } else {
                         VERSION_CHECK_INTERVAL
@@ -125,7 +125,7 @@ pub async fn run(handle: AppHandle) {
                                 checked_instance = Some(instance.clone());
                                 last_version_check = Some(Instant::now());
 
-                                if blocked.take().is_some() {
+                                if blocked {
                                     info!("Server protocol check passed, resuming sync");
                                 }
                             }
@@ -135,8 +135,8 @@ pub async fn run(handle: AppHandle) {
                                     last_version_check = Some(Instant::now());
                                     emit(&handle, "version-mismatch", mismatch.clone());
                                     emit(&handle, "sync-status", SyncStatus::UpgradeRequired);
-                                    blocked = Some(mismatch.clone());
-                                } else if blocked.is_some() {
+                                    blocked = true;
+                                } else if blocked {
                                     last_version_check = Some(Instant::now());
                                     error!("Protocol recheck failed: {e:#}");
                                 } else {
@@ -148,7 +148,7 @@ pub async fn run(handle: AppHandle) {
                         }
                     }
 
-                    if blocked.is_some() {
+                    if blocked {
                         break 'sync;
                     }
 
@@ -165,8 +165,8 @@ pub async fn run(handle: AppHandle) {
                             }
                         }
                         Err(e) => {
-                            if let Some(mismatch) = handle_sync_error(&state, &handle, &e).await {
-                                blocked = Some(mismatch);
+                            if handle_sync_error(&state, &handle, &e).await {
+                                blocked = true;
                                 last_version_check = Some(Instant::now());
                             }
                             break 'sync;
@@ -184,8 +184,8 @@ pub async fn run(handle: AppHandle) {
                             }
                         }
                         Err(e) => {
-                            if let Some(mismatch) = handle_sync_error(&state, &handle, &e).await {
-                                blocked = Some(mismatch);
+                            if handle_sync_error(&state, &handle, &e).await {
+                                blocked = true;
                                 last_version_check = Some(Instant::now());
                             }
                             break 'sync;
