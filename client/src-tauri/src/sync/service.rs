@@ -130,6 +130,7 @@ pub async fn run(handle: AppHandle) {
 
                                 if blocked {
                                     info!("Server protocol check passed, resuming sync");
+                                    blocked = false;
                                 }
                             }
                             Err(e) => {
