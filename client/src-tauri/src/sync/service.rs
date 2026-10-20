@@ -133,19 +133,16 @@ pub async fn run(handle: AppHandle) {
                                 }
                             }
                             Err(e) => {
-                                if let Some(mismatch) = e.downcast_ref::<ProtocolMismatch>() {
-                                    checked_instance = Some(instance.clone());
-                                    last_version_check = Some(Instant::now());
-                                    emit(&handle, "version-mismatch", mismatch.clone());
-                                    emit(&handle, "sync-status", SyncStatus::UpgradeRequired);
-                                    blocked = true;
-                                } else if blocked {
-                                    last_version_check = Some(Instant::now());
-                                    error!("Protocol recheck failed: {e:#}");
+                                if e.downcast_ref::<ProtocolMismatch>().is_some() || !blocked {
+                                    if handle_sync_error(&state, &handle, &e).await {
+                                        checked_instance = Some(instance.clone());
+                                        blocked = true;
+                                    }
                                 } else {
-                                    let _ = handle_sync_error(&state, &handle, &e).await;
+                                    error!("Protocol recheck failed: {e:#}");
                                 }
 
+                                last_version_check = Some(Instant::now());
                                 break 'sync;
                             }
                         }
