@@ -1,34 +1,5 @@
 use anyhow::{Context, Result};
 use shared::{ProtocolCompatibility, ProtocolMismatch, ServerInfo};
-use std::fmt;
-
-/// Error returned when the client and server protocol versions are incompatible.
-#[derive(Debug)]
-pub struct ProtocolMismatchError(pub ProtocolMismatch);
-
-impl fmt::Display for ProtocolMismatchError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0.client_outdated {
-            write!(
-                f,
-                "This app is too old for this server. Update Nooto to continue syncing."
-            )
-        } else if let Some(server) = &self.0.server {
-            write!(
-                f,
-                "This server (v{}) is too old for this version of Nooto. Update the server to continue syncing.",
-                server.server_version
-            )
-        } else {
-            write!(
-                f,
-                "This server does not support version checks. Update it to continue syncing."
-            )
-        }
-    }
-}
-
-impl std::error::Error for ProtocolMismatchError {}
 
 pub async fn fetch_server_info(instance: &str) -> Result<ServerInfo> {
     let client = reqwest::Client::new();
@@ -52,10 +23,10 @@ pub async fn ensure_server_compatible(instance: &str) -> Result<ServerInfo> {
     let info = match fetch_server_info(instance).await {
         Ok(info) => info,
         Err(e) if is_not_found(&e) => {
-            return Err(ProtocolMismatchError(ProtocolMismatch::new(
+            return Err(ProtocolMismatch::new(
                 Some(shared::PROTOCOL_VERSION),
                 None,
-            ))
+            )
             .into());
         }
         Err(e) => return Err(e),
@@ -63,15 +34,15 @@ pub async fn ensure_server_compatible(instance: &str) -> Result<ServerInfo> {
 
     match info.check_client(shared::PROTOCOL_VERSION) {
         ProtocolCompatibility::Compatible => Ok(info),
-        _ => Err(ProtocolMismatchError(ProtocolMismatch::new(
+        _ => Err(ProtocolMismatch::new(
             Some(shared::PROTOCOL_VERSION),
             Some(info),
-        ))
+        )
         .into()),
     }
 }
 
-/// Converts 426 responses into `ProtocolMismatchError`; others pass through.
+/// Converts 426 responses into `ProtocolMismatch`; others pass through.
 pub async fn reject_protocol_mismatch(response: reqwest::Response) -> Result<reqwest::Response> {
     if response.status() != reqwest::StatusCode::UPGRADE_REQUIRED {
         return Ok(response);
@@ -82,7 +53,7 @@ pub async fn reject_protocol_mismatch(response: reqwest::Response) -> Result<req
         .await
         .unwrap_or_else(|_| ProtocolMismatch::new(Some(shared::PROTOCOL_VERSION), None));
 
-    Err(ProtocolMismatchError(mismatch).into())
+    Err(mismatch.into())
 }
 
 fn is_not_found(e: &anyhow::Error) -> bool {
@@ -114,7 +85,7 @@ mod tests {
 
     #[test]
     fn display_client_outdated() {
-        let error = ProtocolMismatchError(mismatch(true, Some(server_info("0.4.0"))));
+        let error = mismatch(true, Some(server_info("0.4.0")));
         assert_eq!(
             error.to_string(),
             "This app is too old for this server. Update Nooto to continue syncing."
@@ -123,7 +94,7 @@ mod tests {
 
     #[test]
     fn display_server_outdated() {
-        let error = ProtocolMismatchError(mismatch(false, Some(server_info("0.3.0"))));
+        let error = mismatch(false, Some(server_info("0.3.0")));
         assert_eq!(
             error.to_string(),
             "This server (v0.3.0) is too old for this version of Nooto. Update the server to continue syncing."
@@ -132,7 +103,7 @@ mod tests {
 
     #[test]
     fn display_missing_server_info() {
-        let error = ProtocolMismatchError(mismatch(false, None));
+        let error = mismatch(false, None);
         assert_eq!(
             error.to_string(),
             "This server does not support version checks. Update it to continue syncing."

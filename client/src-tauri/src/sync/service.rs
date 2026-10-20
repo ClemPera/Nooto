@@ -30,21 +30,16 @@ pub enum SyncStatus {
     UpgradeRequired,
 }
 
-async fn current_workspace(state: &Mutex<AppState>) -> Option<Workspace> {
-    let state = state.lock().await;
-    state.workspace.clone()
-}
-
-/// Reports a failed sync request; returns the mismatch payload for protocol errors.
+/// Reports a failed sync request
 async fn handle_sync_error(
     state: &Mutex<AppState>,
     handle: &AppHandle,
     e: &anyhow::Error,
 ) -> Option<ProtocolMismatch> {
-    if let Some(mismatch) = e.downcast_ref::<sync::version::ProtocolMismatchError>() {
-        emit(handle, "version-mismatch", mismatch.0.clone());
+    if let Some(mismatch) = e.downcast_ref::<ProtocolMismatch>() {
+        emit(handle, "version-mismatch", mismatch.clone());
         emit(handle, "sync-status", SyncStatus::UpgradeRequired);
-        return Some(mismatch.0.clone());
+        return Some(mismatch.clone());
     }
 
     if clear_session_if_unauthorized(state, handle, e).await {
@@ -100,7 +95,10 @@ pub async fn run(handle: AppHandle) {
 
     loop {
         'sync: {
-            let workspace = current_workspace(&state).await;
+            let workspace = {
+                let state = state.lock().await;
+                state.workspace.clone()
+            };
 
             if let Some(workspace) = workspace {
                 if let (Some(_), Some(instance)) = (&workspace.token, &workspace.instance) {
@@ -132,12 +130,12 @@ pub async fn run(handle: AppHandle) {
                                 }
                             }
                             Err(e) => {
-                                if let Some(mismatch) = e.downcast_ref::<sync::version::ProtocolMismatchError>() {
+                                if let Some(mismatch) = e.downcast_ref::<ProtocolMismatch>() {
                                     checked_instance = Some(instance.clone());
                                     last_version_check = Some(Instant::now());
-                                    emit(&handle, "version-mismatch", mismatch.0.clone());
+                                    emit(&handle, "version-mismatch", mismatch.clone());
                                     emit(&handle, "sync-status", SyncStatus::UpgradeRequired);
-                                    blocked = Some(mismatch.0.clone());
+                                    blocked = Some(mismatch.clone());
                                 } else if blocked.is_some() {
                                     last_version_check = Some(Instant::now());
                                     error!("Protocol recheck failed: {e:#}");

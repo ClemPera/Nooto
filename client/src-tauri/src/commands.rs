@@ -1,6 +1,6 @@
 use anyhow::Context;
 use chrono::Local;
-use shared::{SelectNoteParams, SentNotes};
+use shared::{SelectNoteParams, ProtocolMismatch, SentNotes};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
@@ -60,7 +60,7 @@ impl CommandError {
 
 impl From<anyhow::Error> for CommandError {
     fn from(err: anyhow::Error) -> Self {
-        let kind = if err.downcast_ref::<sync::version::ProtocolMismatchError>().is_some() {
+        let kind = if err.downcast_ref::<ProtocolMismatch>().is_some() {
             ErrorKind::UpgradeRequired
         } else if err.downcast_ref::<reqwest::Error>().is_some() {
             ErrorKind::Network

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use std::fmt;
+
 /// Full user record exchanged between client and server during account creation.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct User {
@@ -128,6 +130,30 @@ pub struct ProtocolMismatch {
     pub client_protocol_version: Option<u32>,
     pub server: Option<ServerInfo>,
 }
+
+impl fmt::Display for ProtocolMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.client_outdated {
+            write!(
+                f,
+                "This app is too old for this server. Update Nooto to continue syncing."
+            )
+        } else if let Some(server) = &self.server {
+            write!(
+                f,
+                "This server (v{}) is too old for this version of Nooto. Update the server to continue syncing.",
+                server.server_version
+            )
+        } else {
+            write!(
+                f,
+                "This server does not support version checks. Update it to continue syncing."
+            )
+        }
+    }
+}
+
+impl std::error::Error for ProtocolMismatch {}
 
 /// Result of comparing a client protocol version against a server's accepted range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
