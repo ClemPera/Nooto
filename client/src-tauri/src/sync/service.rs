@@ -96,8 +96,8 @@ struct ProtocolState {
 }
 
 impl ProtocolState {
-    /// Whether the server protocol should be checked for this instance now.
-    fn check_due(&self, instance: &str) -> bool {
+    /// Whether the server protocol should be checked for this instance at `now`.
+    fn check_due(&self, instance: &str, now: Instant) -> bool {
         let interval = if self.blocked {
             VERSION_RECHECK_INTERVAL
         } else {
@@ -105,7 +105,7 @@ impl ProtocolState {
         };
 
         self.checked_instance.as_deref() != Some(instance)
-            || self.last_check.map_or(true, |at| at.elapsed() >= interval)
+            || self.last_check.map_or(true, |at| now.duration_since(at) >= interval)
     }
 }
 
@@ -158,7 +158,7 @@ async fn check_protocol(
         emit(handle, "sync-status", SyncStatus::UpgradeRequired);
     }
 
-    if !protocol.check_due(instance) {
+    if !protocol.check_due(instance, Instant::now()) {
         return !protocol.blocked;
     }
 
@@ -454,4 +454,76 @@ fn decrypt_note_for_emit(note: &Note, workspace: &Workspace) -> Result<commands:
     };
 
     Ok(commands::NoteResponse::from(note_data))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn protocol_state(
+        blocked: bool,
+        checked_instance: Option<&str>,
+        checked_ago: Option<Duration>,
+    ) -> (ProtocolState, Instant) {
+        let now = Instant::now();
+
+        (
+            ProtocolState {
+                checked_instance: checked_instance.map(str::to_owned),
+                last_check: checked_ago.map(|ago| now - ago),
+                blocked,
+            },
+            now,
+        )
+    }
+
+    #[test]
+    fn check_due_when_never_checked() {
+        let (protocol, now) = protocol_state(false, None, None);
+        assert!(protocol.check_due("https://example.com", now));
+    }
+
+    #[test]
+    fn check_due_when_instance_changed() {
+        let (protocol, now) = protocol_state(
+            false,
+            Some("https://old.example.com"),
+            Some(Duration::from_secs(1)),
+        );
+        assert!(protocol.check_due("https://new.example.com", now));
+    }
+
+    #[test]
+    fn check_due_respects_normal_interval() {
+        let (protocol, now) = protocol_state(
+            false,
+            Some("https://example.com"),
+            Some(VERSION_CHECK_INTERVAL - Duration::from_secs(1)),
+        );
+        assert!(!protocol.check_due("https://example.com", now));
+
+        let (protocol, now) = protocol_state(
+            false,
+            Some("https://example.com"),
+            Some(VERSION_CHECK_INTERVAL),
+        );
+        assert!(protocol.check_due("https://example.com", now));
+    }
+
+    #[test]
+    fn check_due_respects_blocked_interval() {
+        let (protocol, now) = protocol_state(
+            true,
+            Some("https://example.com"),
+            Some(VERSION_RECHECK_INTERVAL - Duration::from_secs(1)),
+        );
+        assert!(!protocol.check_due("https://example.com", now));
+
+        let (protocol, now) = protocol_state(
+            true,
+            Some("https://example.com"),
+            Some(VERSION_RECHECK_INTERVAL),
+        );
+        assert!(protocol.check_due("https://example.com", now));
+    }
 }
