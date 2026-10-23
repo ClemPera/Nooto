@@ -17,6 +17,9 @@ use crate::{
     sync,
 };
 
+/// Interval between each sync
+const SYNC_INTERVAL: Duration = Duration::from_secs(1);
+
 /// How often the server protocol version is checked during normal sync.
 const VERSION_CHECK_INTERVAL: Duration = Duration::from_secs(300);
 /// How often the server protocol version is rechecked while sync is blocked.
@@ -117,7 +120,7 @@ pub async fn run(handle: AppHandle) {
 
     loop {
         sync_tick(&state, &handle, &mut protocol).await;
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(SYNC_INTERVAL).await;
     }
 }
 
