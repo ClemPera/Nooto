@@ -33,7 +33,7 @@ pub enum SyncStatus {
     UpgradeRequired,
 }
 
-/// Reports a failed sync request; return true if something is blocking
+/// Reports a failed sync request; return true if ProtocolMismatch error
 async fn handle_sync_error(state: &Mutex<AppState>, handle: &AppHandle, e: &anyhow::Error) -> bool {
     if let Some(mismatch) = e.downcast_ref::<ProtocolMismatch>() {
         emit(handle, "version-mismatch", mismatch.clone());
@@ -87,131 +87,153 @@ async fn clear_session_if_unauthorized(
     true
 }
 
+/// Protocol compatibility state carried between sync ticks.
+#[derive(Default)]
+struct ProtocolState {
+    checked_instance: Option<String>,
+    last_check: Option<Instant>,
+    blocked: bool,
+}
+
+impl ProtocolState {
+    /// Whether the server protocol should be checked for this instance now.
+    fn check_due(&self, instance: &str) -> bool {
+        let interval = if self.blocked {
+            VERSION_RECHECK_INTERVAL
+        } else {
+            VERSION_CHECK_INTERVAL
+        };
+
+        self.checked_instance.as_deref() != Some(instance)
+            || self.last_check.map_or(true, |at| at.elapsed() >= interval)
+    }
+}
+
 /// Background sync loop: every second, pulls new notes from the server then pushes unsynced ones.
 /// Emits `sync-status` and `new_note_metadata` events to the frontend as state changes.
 pub async fn run(handle: AppHandle) {
     let state = handle.state::<Mutex<AppState>>();
-
-    let mut checked_instance: Option<String> = None;
-    let mut last_version_check: Option<Instant> = None;
-    let mut blocked: bool = false;
+    let mut protocol = ProtocolState::default();
 
     loop {
-        'sync: {
-            let workspace = {
-                let state = state.lock().await;
-                state.workspace.clone()
-            };
-
-            if let Some(workspace) = workspace {
-                if let (Some(_), Some(instance)) = (&workspace.token, &workspace.instance) {
-                    let now = Instant::now();
-
-                    if blocked {
-                        emit(&handle, "sync-status", SyncStatus::UpgradeRequired);
-                    }
-
-                    let instance_changed = checked_instance.as_deref() != Some(instance.as_str());
-                    let recheck_interval = if blocked {
-                        VERSION_RECHECK_INTERVAL
-                    } else {
-                        VERSION_CHECK_INTERVAL
-                    };
-
-                    let check_due = instance_changed
-                        || last_version_check
-                            .map_or(true, |at| now.duration_since(at) >= recheck_interval);
-
-                    if check_due {
-                        match sync::version::ensure_server_compatible(instance).await {
-                            Ok(_) => {
-                                checked_instance = Some(instance.clone());
-                                last_version_check = Some(Instant::now());
-
-                                if blocked {
-                                    info!("Server protocol check passed, resuming sync");
-                                    blocked = false;
-                                }
-                            }
-                            Err(e) => {
-                                if e.downcast_ref::<ProtocolMismatch>().is_some() || !blocked {
-                                    if handle_sync_error(&state, &handle, &e).await {
-                                        checked_instance = Some(instance.clone());
-                                        blocked = true;
-                                    }
-                                } else {
-                                    error!("Protocol recheck failed: {e:#}");
-                                }
-
-                                last_version_check = Some(Instant::now());
-                                break 'sync;
-                            }
-                        }
-                    }
-
-                    if blocked {
-                        break 'sync;
-                    }
-
-                    let current_last_seen = workspace.last_sync_at;
-
-                    match receive_latest_notes(
-                        &state,
-                        workspace.clone(),
-                        current_last_seen,
-                        &handle,
-                    )
-                    .await
-                    {
-                        Ok(max_ts) => {
-                            if let Some(ts) = max_ts {
-                                if let Err(e) =
-                                    update_last_sync(&state, workspace.clone(), ts).await
-                                {
-                                    error!("{e:#}");
-                                    emit(&handle, "sync-status", SyncStatus::Error);
-                                    break 'sync;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            if handle_sync_error(&state, &handle, &e).await {
-                                blocked = true;
-                                last_version_check = Some(Instant::now());
-                            }
-                            break 'sync;
-                        }
-                    }
-
-                    match send_latest_notes(&state, workspace.clone(), &handle).await {
-                        Ok(max_ts) => {
-                            if let Some(ts) = max_ts {
-                                if let Err(e) =
-                                    update_last_sync(&state, workspace.clone(), ts).await
-                                {
-                                    error!("{e:#}");
-                                    emit(&handle, "sync-status", SyncStatus::Error);
-                                    break 'sync;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            if handle_sync_error(&state, &handle, &e).await {
-                                blocked = true;
-                                last_version_check = Some(Instant::now());
-                            }
-                            break 'sync;
-                        }
-                    }
-
-                    emit(&handle, "sync-status", SyncStatus::Synched);
-                } else {
-                    emit(&handle, "sync-status", SyncStatus::NotConnected);
-                }
-            }
-        }
-
+        sync_tick(&state, &handle, &mut protocol).await;
         tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+/// One sync attempt: checks protocol compatibility, then pulls and pushes notes.
+async fn sync_tick(state: &Mutex<AppState>, handle: &AppHandle, protocol: &mut ProtocolState) {
+    let workspace = {
+        let state = state.lock().await;
+        state.workspace.clone()
+    };
+    let Some(workspace) = workspace else {
+        return;
+    };
+
+    let (Some(_), Some(instance)) = (&workspace.token, &workspace.instance) else {
+        emit(handle, "sync-status", SyncStatus::NotConnected);
+        return;
+    };
+
+    if !check_protocol(state, handle, protocol, instance).await {
+        return;
+    }
+
+    if !sync_notes(state, handle, &workspace, protocol).await {
+        return;
+    }
+
+    emit(handle, "sync-status", SyncStatus::Synched);
+}
+
+/// Checks the server protocol when due; returns false when this tick must stop.
+async fn check_protocol(
+    state: &Mutex<AppState>,
+    handle: &AppHandle,
+    protocol: &mut ProtocolState,
+    instance: &str,
+) -> bool {
+    if protocol.blocked {
+        emit(handle, "sync-status", SyncStatus::UpgradeRequired);
+    }
+
+    if !protocol.check_due(instance) {
+        return !protocol.blocked;
+    }
+
+    match sync::version::ensure_server_compatible(instance).await {
+        Ok(_) => {
+            protocol.checked_instance = Some(instance.to_owned());
+            protocol.last_check = Some(Instant::now());
+
+            if protocol.blocked {
+                info!("Server protocol check passed, resuming sync");
+                protocol.blocked = false;
+            }
+
+            true
+        }
+        Err(e) => {
+            if e.downcast_ref::<ProtocolMismatch>().is_some() || !protocol.blocked {
+                if handle_sync_error(state, handle, &e).await {
+                    protocol.checked_instance = Some(instance.to_owned());
+                    protocol.blocked = true;
+                }
+            } else {
+                error!("Protocol recheck failed: {e:#}");
+            }
+
+            protocol.last_check = Some(Instant::now());
+            false
+        }
+    }
+}
+
+/// Pulls remote notes then pushes local ones; returns false when this tick must stop.
+async fn sync_notes(
+    state: &Mutex<AppState>,
+    handle: &AppHandle,
+    workspace: &Workspace,
+    protocol: &mut ProtocolState,
+) -> bool {
+    let received =
+        receive_latest_notes(state, workspace.clone(), workspace.last_sync_at, handle).await;
+
+    if !apply_sync_result(state, handle, workspace, protocol, received).await {
+        return false;
+    }
+
+    let sent = send_latest_notes(state, workspace.clone(), handle).await;
+    apply_sync_result(state, handle, workspace, protocol, sent).await
+}
+
+/// Advances `last_sync_at` when the request returned a timestamp; reports failures.
+async fn apply_sync_result(
+    state: &Mutex<AppState>,
+    handle: &AppHandle,
+    workspace: &Workspace,
+    protocol: &mut ProtocolState,
+    result: Result<Option<i64>>,
+) -> bool {
+    match result {
+        Ok(Some(timestamp)) => match update_last_sync(state, workspace.clone(), timestamp).await {
+            Ok(()) => true,
+            Err(e) => {
+                error!("{e:#}");
+                emit(handle, "sync-status", SyncStatus::Error);
+                false
+            }
+        },
+        Ok(None) => true,
+        Err(e) => {
+            if handle_sync_error(state, handle, &e).await {
+                protocol.blocked = true;
+                protocol.last_check = Some(Instant::now());
+            }
+
+            false
+        }
     }
 }
 
