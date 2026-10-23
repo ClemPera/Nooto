@@ -108,7 +108,9 @@ impl ProtocolState {
         };
 
         self.checked_instance.as_deref() != Some(instance)
-            || self.last_check.map_or(true, |at| now.duration_since(at) >= interval)
+            || self
+                .last_check
+                .map_or(true, |at| now.duration_since(at) >= interval)
     }
 }
 
