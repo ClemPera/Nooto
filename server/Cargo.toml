@@ -2,7 +2,7 @@
 name = "nooto-server"
 version = "0.2.0"
 edition = "2024"
-description = "A cross-platform, privacy-focused note-taking application with end-to-end encryption and self-hostable sync capabilities. The application prioritizes local-first architecture with optional cloud synchronization, enabling users to maintain full control over their data. " 
+description = "A cross-platform, privacy-focused note-taking application with end-to-end encryption and self-hostable sync capabilities. The application prioritizes local-first architecture with optional cloud synchronization, enabling users to maintain full control over their data. "
 authors = ["Clément Pera"]
 readme = "../README.md"
 repository = "https://github.com/ClemPera/Nooto"
@@ -23,17 +23,19 @@ assets = [
 
 [dependencies]
 shared = { path = "../shared" }
-axum = { version="0.8", features = ["macros"] }
-chrono = { version="0.4", features = ["serde"] }
-dotenvy = "0.15"   
-mysql_async = { version="0.37", features = ["chrono"] }
+axum = { version = "0.8", features = ["macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+mysql_async = { version = "0.37", features = ["chrono"] }
 rand = "0.10"
 serde = { version = "1", features = ["derive"] }
-tokio = { version="1.48", features = ["rt-multi-thread", "macros"]}
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros"] }
 hex = "0.4"
 anyhow = "1.0"
 subtle = "2.6"
-tower_governor = { version = "0.8", default-features = false, features = ["axum"] } # default-features now include tonic (useless here) 
+tower_governor = { version = "0.8", default-features = false, features = [
+    "axum",
+] } # default-features now include tonic (useless here)
 argon2 = { version = "0.5", features = ["std"] }
 
 [dev-dependencies]
