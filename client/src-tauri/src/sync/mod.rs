@@ -28,6 +28,15 @@ fn build_http_client(connect_timeout: Duration, request_timeout: Duration) -> re
         .expect("Failed to build HTTP client")
 }
 
+/// Joins a server base URL with an endpoint path, avoiding duplicate slashes.
+pub fn endpoint(instance: &str, path: &str) -> String {
+    format!(
+        "{}/{}",
+        instance.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
+}
+
 /// Assembles the `shared::User` payload from workspace and account encryption data,
 /// then posts it to the server's `/create_account` endpoint.
 pub async fn create_account(
@@ -109,5 +118,33 @@ mod tests {
             .expect_err("request should time out");
 
         assert!(error.is_timeout());
+    }
+
+    #[test]
+    fn endpoint_adds_missing_slash() {
+        assert_eq!(
+            endpoint("https://example.com", "/notes"),
+            "https://example.com/notes"
+        );
+    }
+
+    #[test]
+    fn endpoint_ignores_trailing_slashes() {
+        assert_eq!(
+            endpoint("https://example.com/", "/notes"),
+            "https://example.com/notes"
+        );
+        assert_eq!(
+            endpoint("https://example.com///", "notes"),
+            "https://example.com/notes"
+        );
+    }
+
+    #[test]
+    fn endpoint_preserves_base_path() {
+        assert_eq!(
+            endpoint("https://example.com/nooto/", "/notes"),
+            "https://example.com/nooto/notes"
+        );
     }
 }
