@@ -1,6 +1,6 @@
 import { handleCommandError } from "../../lib/errors";
 import { invoke } from "@tauri-apps/api/core";
-import { useGeneral } from "../../store/general";
+import { syncStatusLabel, useGeneral } from "../../store/general";
 import { useModals } from "../../store/modals";
 import { trace } from "@tauri-apps/plugin-log";
 import { Workspace } from "../../types";
@@ -51,7 +51,7 @@ export default function LogoutWorkspaceConfirmModal() {
               <h2 className="text-2xl font-bold text-white mb-2">Warning</h2>
               <p className="text-white">
                 Everything saved locally that is not synced will not be recoverable. Current sync status is{" "}
-                <span className="font-bold">{syncStatus}</span>.
+                <span className="font-bold">{syncStatusLabel(syncStatus)}</span>.
               </p>
             </div>
 

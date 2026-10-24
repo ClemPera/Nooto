@@ -5,6 +5,7 @@ use crate::{crypt, db::schema::Workspace};
 
 pub mod operations;
 pub mod service;
+pub mod version;
 
 /// Assembles the `shared::User` payload from workspace and account encryption data,
 /// then posts it to the server's `/create_account` endpoint.

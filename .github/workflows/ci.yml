@@ -18,8 +18,8 @@ jobs:
         with:
           workspaces: ". -> target"
 
-      - name: Run server tests
-        run: cargo test -p nooto-server
+      - name: Run shared and server tests
+        run: cargo test -p shared -p nooto-server
 
   test-rust-client:
     name: Rust Client Tests

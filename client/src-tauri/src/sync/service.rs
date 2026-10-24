@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
-use shared::{SelectNotesParams, SentNotes};
+use shared::{ProtocolMismatch, SelectNotesParams, SentNotes};
+use std::time::Instant;
 use tokio::{sync::Mutex, time::Duration};
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -9,9 +10,20 @@ use tauri_plugin_log::log::{debug, error, info};
 use crate::{
     AppState, commands,
     crypt::{self, NoteData},
-    db::{self, schema::{Note, Workspace}},
+    db::{
+        self,
+        schema::{Note, Workspace},
+    },
     sync,
 };
+
+/// Interval between each sync
+const SYNC_INTERVAL: Duration = Duration::from_secs(1);
+
+/// How often the server protocol version is checked during normal sync.
+const VERSION_CHECK_INTERVAL: Duration = Duration::from_secs(300);
+/// How often the server protocol version is rechecked while sync is blocked.
+const VERSION_RECHECK_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Sync state emitted to the frontend via the `sync-status` Tauri event.
 #[derive(Clone, Serialize)]
@@ -21,6 +33,32 @@ pub enum SyncStatus {
     Error,
     Offline,
     NotConnected,
+    UpgradeRequired,
+}
+
+/// Reports a failed sync request; return true if ProtocolMismatch error
+async fn handle_sync_error(state: &Mutex<AppState>, handle: &AppHandle, e: &anyhow::Error) -> bool {
+    if let Some(mismatch) = e.downcast_ref::<ProtocolMismatch>() {
+        emit(handle, "version-mismatch", mismatch.clone());
+        emit(handle, "sync-status", SyncStatus::UpgradeRequired);
+        return true;
+    }
+
+    if clear_session_if_unauthorized(state, handle, e).await {
+        return false;
+    }
+
+    if e.downcast_ref::<reqwest::Error>()
+        .map_or(false, |e| e.is_connect())
+    {
+        emit(handle, "sync-status", SyncStatus::Offline);
+        info!("Couldn't connect to server");
+    } else {
+        emit(handle, "sync-status", SyncStatus::Error);
+        error!("{e:#}");
+    }
+
+    false
 }
 
 /// Clears stored credentials and notifies the frontend when the server rejects the session.
@@ -30,7 +68,9 @@ async fn clear_session_if_unauthorized(
     handle: &AppHandle,
     e: &anyhow::Error,
 ) -> bool {
-    let status = e.downcast_ref::<reqwest::Error>().and_then(reqwest::Error::status);
+    let status = e
+        .downcast_ref::<reqwest::Error>()
+        .and_then(reqwest::Error::status);
 
     if !matches!(
         status,
@@ -50,80 +90,155 @@ async fn clear_session_if_unauthorized(
     true
 }
 
+/// Protocol compatibility state carried between sync ticks.
+#[derive(Default)]
+struct ProtocolState {
+    checked_instance: Option<String>,
+    last_check: Option<Instant>,
+    blocked: bool,
+}
+
+impl ProtocolState {
+    /// Whether the server protocol should be checked for this instance at `now`.
+    fn check_due(&self, instance: &str, now: Instant) -> bool {
+        let interval = if self.blocked {
+            VERSION_RECHECK_INTERVAL
+        } else {
+            VERSION_CHECK_INTERVAL
+        };
+
+        self.checked_instance.as_deref() != Some(instance)
+            || self
+                .last_check
+                .map_or(true, |at| now.duration_since(at) >= interval)
+    }
+}
+
 /// Background sync loop: every second, pulls new notes from the server then pushes unsynced ones.
 /// Emits `sync-status` and `new_note_metadata` events to the frontend as state changes.
 pub async fn run(handle: AppHandle) {
     let state = handle.state::<Mutex<AppState>>();
+    let mut protocol = ProtocolState::default();
 
     loop {
-        'sync: {
-            let workspace = {
-                let state = state.lock().await;
-                state.workspace.clone()
-            };
+        sync_tick(&state, &handle, &mut protocol).await;
+        tokio::time::sleep(SYNC_INTERVAL).await;
+    }
+}
 
-            if let Some(workspace) = workspace {
-                if workspace.token.is_some() && workspace.instance.is_some() {
-                    let current_last_seen = workspace.last_sync_at;
+/// One sync attempt: checks protocol compatibility, then pulls and pushes notes.
+async fn sync_tick(state: &Mutex<AppState>, handle: &AppHandle, protocol: &mut ProtocolState) {
+    let workspace = {
+        let state = state.lock().await;
+        state.workspace.clone()
+    };
+    let Some(workspace) = workspace else {
+        return;
+    };
 
-                    match receive_latest_notes(&state, workspace.clone(), current_last_seen, &handle).await {
-                        Ok(max_ts) => {
-                            if let Some(ts) = max_ts {
-                                if let Err(e) = update_last_sync(&state, workspace.clone(), ts).await {
-                                    error!("{e:#}");
-                                    emit(&handle, "sync-status", SyncStatus::Error);
-                                    break 'sync;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            if clear_session_if_unauthorized(&state, &handle, &e).await {
-                                break 'sync;
-                            }
-                            if e.downcast_ref::<reqwest::Error>().map_or(false, |e| e.is_connect()) {
-                                emit(&handle, "sync-status", SyncStatus::Offline);
-                                info!("Couldn't connect to server");
-                            } else {
-                                emit(&handle, "sync-status", SyncStatus::Error);
-                                error!("{e:#}");
-                            }
-                            break 'sync;
-                        }
-                    }
+    let (Some(_), Some(instance)) = (&workspace.token, &workspace.instance) else {
+        emit(handle, "sync-status", SyncStatus::NotConnected);
+        return;
+    };
 
-                    match send_latest_notes(&state, workspace.clone(), &handle).await {
-                        Ok(max_ts) => {
-                            if let Some(ts) = max_ts {
-                                if let Err(e) = update_last_sync(&state, workspace.clone(), ts).await {
-                                    error!("{e:#}");
-                                    emit(&handle, "sync-status", SyncStatus::Error);
-                                    break 'sync;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            if clear_session_if_unauthorized(&state, &handle, &e).await {
-                                break 'sync;
-                            }
-                            if e.downcast_ref::<reqwest::Error>().map_or(false, |e| e.is_connect()) {
-                                emit(&handle, "sync-status", SyncStatus::Offline);
-                                info!("Couldn't connect to server");
-                            } else {
-                                emit(&handle, "sync-status", SyncStatus::Error);
-                                error!("{e:#}");
-                            }
-                            break 'sync;
-                        }
-                    }
+    if !check_protocol(state, handle, protocol, instance).await {
+        return;
+    }
 
-                    emit(&handle, "sync-status", SyncStatus::Synched);
-                } else {
-                    emit(&handle, "sync-status", SyncStatus::NotConnected);
-                }
+    if !sync_notes(state, handle, &workspace, protocol).await {
+        return;
+    }
+
+    emit(handle, "sync-status", SyncStatus::Synched);
+}
+
+/// Checks the server protocol when due; returns false when this tick must stop.
+async fn check_protocol(
+    state: &Mutex<AppState>,
+    handle: &AppHandle,
+    protocol: &mut ProtocolState,
+    instance: &str,
+) -> bool {
+    if protocol.blocked {
+        emit(handle, "sync-status", SyncStatus::UpgradeRequired);
+    }
+
+    if !protocol.check_due(instance, Instant::now()) {
+        return !protocol.blocked;
+    }
+
+    match sync::version::ensure_server_compatible(instance).await {
+        Ok(_) => {
+            protocol.checked_instance = Some(instance.to_owned());
+            protocol.last_check = Some(Instant::now());
+
+            if protocol.blocked {
+                info!("Server protocol check passed, resuming sync");
+                protocol.blocked = false;
             }
-        }
 
-        tokio::time::sleep(Duration::from_secs(1)).await;
+            true
+        }
+        Err(e) => {
+            if e.downcast_ref::<ProtocolMismatch>().is_some() || !protocol.blocked {
+                if handle_sync_error(state, handle, &e).await {
+                    protocol.checked_instance = Some(instance.to_owned());
+                    protocol.blocked = true;
+                }
+            } else {
+                error!("Protocol recheck failed: {e:#}");
+            }
+
+            protocol.last_check = Some(Instant::now());
+            false
+        }
+    }
+}
+
+/// Pulls remote notes then pushes local ones; returns false when this tick must stop.
+async fn sync_notes(
+    state: &Mutex<AppState>,
+    handle: &AppHandle,
+    workspace: &Workspace,
+    protocol: &mut ProtocolState,
+) -> bool {
+    let received =
+        receive_latest_notes(state, workspace.clone(), workspace.last_sync_at, handle).await;
+
+    if !apply_sync_result(state, handle, workspace, protocol, received).await {
+        return false;
+    }
+
+    let sent = send_latest_notes(state, workspace.clone(), handle).await;
+    apply_sync_result(state, handle, workspace, protocol, sent).await
+}
+
+/// Advances `last_sync_at` when the request returned a timestamp; reports failures.
+async fn apply_sync_result(
+    state: &Mutex<AppState>,
+    handle: &AppHandle,
+    workspace: &Workspace,
+    protocol: &mut ProtocolState,
+    result: Result<Option<i64>>,
+) -> bool {
+    match result {
+        Ok(Some(timestamp)) => match update_last_sync(state, workspace.clone(), timestamp).await {
+            Ok(()) => true,
+            Err(e) => {
+                error!("{e:#}");
+                emit(handle, "sync-status", SyncStatus::Error);
+                false
+            }
+        },
+        Ok(None) => true,
+        Err(e) => {
+            if handle_sync_error(state, handle, &e).await {
+                protocol.blocked = true;
+                protocol.last_check = Some(Instant::now());
+            }
+
+            false
+        }
     }
 }
 
@@ -145,12 +260,22 @@ pub async fn receive_latest_notes(
     let token = workspace.token.clone().context("Workspace has no token")?;
 
     let params = SelectNotesParams {
-        username: workspace.username.clone().context("Workspace has no username")?,
+        username: workspace
+            .username
+            .clone()
+            .context("Workspace has no username")?,
         updated_at: last_seen,
     };
 
-    let notes = sync::operations::select_notes(params, &token, workspace.instance.clone().context("Workspace has no instance")?)
-        .await?;
+    let notes = sync::operations::select_notes(
+        params,
+        &token,
+        workspace
+            .instance
+            .clone()
+            .context("Workspace has no instance")?,
+    )
+    .await?;
 
     if notes.is_empty() {
         return Ok(None);
@@ -167,11 +292,15 @@ pub async fn receive_latest_notes(
         let mut note = db::schema::Note::from(note);
         note.id_workspace = Some(workspace.id);
 
-        match Note::select(&conn, note.uuid.clone()).context("Failed to look up note in database")? {
+        match Note::select(&conn, note.uuid.clone())
+            .context("Failed to look up note in database")?
+        {
             Some(sn) => {
                 if note.updated_at > sn.updated_at {
                     match sn.synched {
-                        true => note.update(&conn).context("Failed to update received note")?,
+                        true => note
+                            .update(&conn)
+                            .context("Failed to update received note")?,
                         false => {
                             info!("Note {:?} is in conflict (client side)", note.uuid);
 
@@ -181,7 +310,9 @@ pub async fn receive_latest_notes(
                     }
                 }
             }
-            None => note.insert(&conn).context("Failed to insert received note")?,
+            None => note
+                .insert(&conn)
+                .context("Failed to insert received note")?,
         }
     }
 
@@ -225,7 +356,10 @@ pub async fn send_latest_notes(
         emit(handle, "sync-status", SyncStatus::Syncing);
 
         let sent_notes = SentNotes {
-            username: workspace.username.clone().context("Workspace has no username")?,
+            username: workspace
+                .username
+                .clone()
+                .context("Workspace has no username")?,
             notes: unsynced_notes.into_iter().map(|n| n.into()).collect(),
             token: workspace.token.clone().context("Workspace has no token")?,
             force: false,
@@ -233,7 +367,10 @@ pub async fn send_latest_notes(
 
         let results = sync::operations::send_notes(
             sent_notes,
-            workspace.instance.clone().context("Workspace has no instance")?,
+            workspace
+                .instance
+                .clone()
+                .context("Workspace has no instance")?,
         )
         .await?;
 
@@ -247,7 +384,8 @@ pub async fn send_latest_notes(
                         .context("Failed to find sent note in database")?
                         .ok_or_else(|| anyhow::anyhow!("Sent note '{}' not found", result.uuid))?;
                     note.synched = true;
-                    note.update(&conn).context("Failed to mark note as synched")?;
+                    note.update(&conn)
+                        .context("Failed to mark note as synched")?;
 
                     max_server_received_at = Some(
                         max_server_received_at
@@ -255,7 +393,10 @@ pub async fn send_latest_notes(
                     );
                 }
                 shared::NoteStatus::Conflict(conflicted_note) => {
-                    info!("Note {:?} is in conflict (server side)", conflicted_note.uuid);
+                    info!(
+                        "Note {:?} is in conflict (server side)",
+                        conflicted_note.uuid
+                    );
                     let note = db::schema::Note::from(conflicted_note);
                     let decrypted_note = decrypt_note_for_emit(&note, &workspace)?;
                     emit(handle, "conflict", decrypted_note);
@@ -293,10 +434,15 @@ pub async fn update_last_sync(
 
 /// Decrypts a note into a frontend-ready NoteResponse, used before emitting conflict events.
 fn decrypt_note_for_emit(note: &Note, workspace: &Workspace) -> Result<commands::NoteResponse> {
-    let content_plaintext = crypt::decrypt_data(&note.content, &note.nonce, &workspace.master_encryption_key)
-        .context("Failed to decrypt conflicted note content")?;
-    let metadata_plaintext = crypt::decrypt_data(&note.metadata, &note.metadata_nonce, &workspace.master_encryption_key)
-        .context("Failed to decrypt conflicted note metadata")?;
+    let content_plaintext =
+        crypt::decrypt_data(&note.content, &note.nonce, &workspace.master_encryption_key)
+            .context("Failed to decrypt conflicted note content")?;
+    let metadata_plaintext = crypt::decrypt_data(
+        &note.metadata,
+        &note.metadata_nonce,
+        &workspace.master_encryption_key,
+    )
+    .context("Failed to decrypt conflicted note metadata")?;
     let metadata: crypt::NoteMetadata = serde_json::from_slice(&metadata_plaintext)
         .context("Failed to parse conflicted note metadata")?;
 
@@ -313,4 +459,76 @@ fn decrypt_note_for_emit(note: &Note, workspace: &Workspace) -> Result<commands:
     };
 
     Ok(commands::NoteResponse::from(note_data))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn protocol_state(
+        blocked: bool,
+        checked_instance: Option<&str>,
+        checked_ago: Option<Duration>,
+    ) -> (ProtocolState, Instant) {
+        let now = Instant::now();
+
+        (
+            ProtocolState {
+                checked_instance: checked_instance.map(str::to_owned),
+                last_check: checked_ago.map(|ago| now - ago),
+                blocked,
+            },
+            now,
+        )
+    }
+
+    #[test]
+    fn check_due_when_never_checked() {
+        let (protocol, now) = protocol_state(false, None, None);
+        assert!(protocol.check_due("https://example.com", now));
+    }
+
+    #[test]
+    fn check_due_when_instance_changed() {
+        let (protocol, now) = protocol_state(
+            false,
+            Some("https://old.example.com"),
+            Some(Duration::from_secs(1)),
+        );
+        assert!(protocol.check_due("https://new.example.com", now));
+    }
+
+    #[test]
+    fn check_due_respects_normal_interval() {
+        let (protocol, now) = protocol_state(
+            false,
+            Some("https://example.com"),
+            Some(VERSION_CHECK_INTERVAL - Duration::from_secs(1)),
+        );
+        assert!(!protocol.check_due("https://example.com", now));
+
+        let (protocol, now) = protocol_state(
+            false,
+            Some("https://example.com"),
+            Some(VERSION_CHECK_INTERVAL),
+        );
+        assert!(protocol.check_due("https://example.com", now));
+    }
+
+    #[test]
+    fn check_due_respects_blocked_interval() {
+        let (protocol, now) = protocol_state(
+            true,
+            Some("https://example.com"),
+            Some(VERSION_RECHECK_INTERVAL - Duration::from_secs(1)),
+        );
+        assert!(!protocol.check_due("https://example.com", now));
+
+        let (protocol, now) = protocol_state(
+            true,
+            Some("https://example.com"),
+            Some(VERSION_RECHECK_INTERVAL),
+        );
+        assert!(protocol.check_due("https://example.com", now));
+    }
 }

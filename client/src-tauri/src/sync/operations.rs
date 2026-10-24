@@ -1,16 +1,22 @@
 use anyhow::{Context, Result};
 use shared::{LoginRequestParams, Note, SelectNoteParams, SelectNotesParams, SentNotes, User};
 
+use super::version;
+
 /// `POST /notes` — uploads a batch of notes and returns per-note results (Ok or Conflict).
 pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared::SentNotesResult>> {
     let client = reqwest::Client::new();
 
     let response = client
         .post(instance + "/notes")
+        .header(shared::PROTOCOL_VERSION_HEADER, shared::PROTOCOL_VERSION.to_string())
         .json(&notes)
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server")?;
+
+    let response = version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Server rejected the notes")?;
 
@@ -26,11 +32,15 @@ pub async fn select_notes(params: SelectNotesParams, token: &[u8], instance: Str
 
     let response = client
         .get(instance + "/notes")
+        .header(shared::PROTOCOL_VERSION_HEADER, shared::PROTOCOL_VERSION.to_string())
         .query(&params)
         .bearer_auth(hex::encode(token))
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server")?;
+
+    let response = version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Server rejected the notes request")?;
 
@@ -46,11 +56,15 @@ pub async fn select_note(params: SelectNoteParams, token: &[u8], instance: Strin
 
     let response = client
         .get(instance + "/note")
+        .header(shared::PROTOCOL_VERSION_HEADER, shared::PROTOCOL_VERSION.to_string())
         .query(&params)
         .bearer_auth(hex::encode(token))
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server")?;
+
+    let response = version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Server rejected the note request")?;
 
@@ -64,12 +78,16 @@ pub async fn select_note(params: SelectNoteParams, token: &[u8], instance: Strin
 pub async fn create_account(user: User, instance: String) -> Result<()> {
     let client = reqwest::Client::new();
 
-    client
+    let response = client
         .post(instance + "/create_account")
+        .header(shared::PROTOCOL_VERSION_HEADER, shared::PROTOCOL_VERSION.to_string())
         .json(&user)
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server")?;
+
+    version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Server rejected account creation")?;
 
@@ -82,10 +100,14 @@ pub async fn login_request(params: LoginRequestParams, instance: String) -> Resu
 
     let response = client
         .get(instance + "/login")
+        .header(shared::PROTOCOL_VERSION_HEADER, shared::PROTOCOL_VERSION.to_string())
         .query(&params)
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server")?;
+
+    let response = version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Server rejected login request")?;
 
@@ -101,10 +123,14 @@ pub async fn login(params: shared::LoginParams, instance: String) -> Result<shar
 
     let response = client
         .post(instance + "/login")
+        .header(shared::PROTOCOL_VERSION_HEADER, shared::PROTOCOL_VERSION.to_string())
         .json(&params)
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server")?;
+
+    let response = version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Login failed")?;
 
