@@ -1,12 +1,14 @@
 use anyhow::{Context, Result};
 use shared::{LoginRequestParams, Note, SelectNoteParams, SelectNotesParams, SentNotes, User};
 
+use super::endpoint;
+
 /// `POST /notes` — uploads a batch of notes and returns per-note results (Ok or Conflict).
 pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared::SentNotesResult>> {
     let client = reqwest::Client::new();
 
     let response = client
-        .post(instance + "/notes")
+        .post(endpoint(&instance, "/notes"))
         .json(&notes)
         .send()
         .await
@@ -25,7 +27,7 @@ pub async fn select_notes(params: SelectNotesParams, token: &[u8], instance: Str
     let client = reqwest::Client::new();
 
     let response = client
-        .get(instance + "/notes")
+        .get(endpoint(&instance, "/notes"))
         .query(&params)
         .bearer_auth(hex::encode(token))
         .send()
@@ -45,7 +47,7 @@ pub async fn select_note(params: SelectNoteParams, token: &[u8], instance: Strin
     let client = reqwest::Client::new();
 
     let response = client
-        .get(instance + "/note")
+        .get(endpoint(&instance, "/note"))
         .query(&params)
         .bearer_auth(hex::encode(token))
         .send()
@@ -65,7 +67,7 @@ pub async fn create_account(user: User, instance: String) -> Result<()> {
     let client = reqwest::Client::new();
 
     client
-        .post(instance + "/create_account")
+        .post(endpoint(&instance, "/create_account"))
         .json(&user)
         .send()
         .await
@@ -81,7 +83,7 @@ pub async fn login_request(params: LoginRequestParams, instance: String) -> Resu
     let client = reqwest::Client::new();
 
     let response = client
-        .get(instance + "/login")
+        .get(endpoint(&instance, "/login"))
         .query(&params)
         .send()
         .await
@@ -100,7 +102,7 @@ pub async fn login(params: shared::LoginParams, instance: String) -> Result<shar
     let client = reqwest::Client::new();
 
     let response = client
-        .post(instance + "/login")
+        .post(endpoint(&instance, "/login"))
         .json(&params)
         .send()
         .await
