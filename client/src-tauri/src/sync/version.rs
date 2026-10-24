@@ -70,7 +70,6 @@ mod tests {
         ServerInfo {
             server_version: server_version.to_string(),
             protocol_version: 1,
-            min_client_protocol_version: 1,
         }
     }
 

@@ -108,7 +108,7 @@ pub struct LogoutParams {
     pub token: Vec<u8>,
 }
 
-/// Bumped only on breaking wire changes; UI-only releases must not bump it.
+/// Bumped only on breaking wire changes; the server accepts exactly this version.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Header carrying the client's protocol version on every API request.
@@ -119,7 +119,6 @@ pub const PROTOCOL_VERSION_HEADER: &str = "x-nooto-protocol-version";
 pub struct ServerInfo {
     pub server_version: String,
     pub protocol_version: u32,
-    pub min_client_protocol_version: u32,
 }
 
 /// Returned by the server when the client's protocol version is not accepted.
@@ -155,7 +154,7 @@ impl fmt::Display for ProtocolMismatch {
 
 impl std::error::Error for ProtocolMismatch {}
 
-/// Result of comparing a client protocol version against a server's accepted range.
+/// Result of comparing a client protocol version against the server's protocol version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtocolCompatibility {
     Compatible,
@@ -165,7 +164,7 @@ pub enum ProtocolCompatibility {
 
 impl ServerInfo {
     pub fn check_client(&self, client_protocol_version: u32) -> ProtocolCompatibility {
-        if client_protocol_version < self.min_client_protocol_version {
+        if client_protocol_version < self.protocol_version {
             ProtocolCompatibility::ClientOutdated
         } else if client_protocol_version > self.protocol_version {
             ProtocolCompatibility::ServerOutdated
@@ -199,42 +198,40 @@ impl ProtocolMismatch {
 mod tests {
     use super::*;
 
-    fn server_info(protocol_version: u32, min_client_protocol_version: u32) -> ServerInfo {
+    fn server_info(protocol_version: u32) -> ServerInfo {
         ServerInfo {
             server_version: "0.3.0".to_string(),
             protocol_version,
-            min_client_protocol_version,
         }
     }
 
     #[test]
-    fn client_below_minimum_is_outdated() {
-        let info = server_info(2, 2);
+    fn client_below_server_is_outdated() {
+        let info = server_info(2);
         assert_eq!(info.check_client(1), ProtocolCompatibility::ClientOutdated);
     }
 
     #[test]
     fn client_above_server_is_server_outdated() {
-        let info = server_info(1, 1);
+        let info = server_info(1);
         assert_eq!(info.check_client(2), ProtocolCompatibility::ServerOutdated);
     }
 
     #[test]
-    fn client_in_accepted_range_is_compatible() {
-        let info = server_info(2, 1);
-        assert_eq!(info.check_client(1), ProtocolCompatibility::Compatible);
+    fn client_matching_server_is_compatible() {
+        let info = server_info(2);
         assert_eq!(info.check_client(2), ProtocolCompatibility::Compatible);
     }
 
     #[test]
     fn missing_client_version_marks_client_outdated() {
-        let mismatch = ProtocolMismatch::new(None, Some(server_info(1, 1)));
+        let mismatch = ProtocolMismatch::new(None, Some(server_info(1)));
         assert!(mismatch.client_outdated);
     }
 
     #[test]
     fn newer_client_does_not_mark_client_outdated() {
-        let mismatch = ProtocolMismatch::new(Some(2), Some(server_info(1, 1)));
+        let mismatch = ProtocolMismatch::new(Some(2), Some(server_info(1)));
         assert!(!mismatch.client_outdated);
     }
 

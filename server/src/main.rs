@@ -128,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Builds the router; `/version` stays public so old clients can discover the protocol range.
+/// Builds the router; `/version` stays public so clients can check compatibility before authenticating.
 fn app(pool: Pool) -> anyhow::Result<Router> {
     // Rate-limited below: /login and /create_account are what an attacker would brute-force.
     let auth_governor_conf = Arc::new(
@@ -169,7 +169,6 @@ fn server_info() -> shared::ServerInfo {
     shared::ServerInfo {
         server_version: env!("CARGO_PKG_VERSION").to_string(),
         protocol_version: shared::PROTOCOL_VERSION,
-        min_client_protocol_version: constants::MIN_CLIENT_PROTOCOL_VERSION,
     }
 }
 
@@ -542,10 +541,6 @@ mod tests {
         let info = server_info();
         assert_eq!(info.server_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(info.protocol_version, shared::PROTOCOL_VERSION);
-        assert_eq!(
-            info.min_client_protocol_version,
-            constants::MIN_CLIENT_PROTOCOL_VERSION
-        );
     }
 
     fn headers_with_protocol(value: &str) -> HeaderMap {
@@ -564,21 +559,36 @@ mod tests {
 
     #[test]
     fn matching_protocol_header_is_accepted() {
-        assert!(check_client_protocol(&headers_with_protocol("1")).is_ok());
+        assert!(check_client_protocol(&headers_with_protocol(
+            &shared::PROTOCOL_VERSION.to_string(),
+        ))
+        .is_ok());
     }
 
     #[test]
     fn older_protocol_header_is_client_outdated() {
-        let mismatch = check_client_protocol(&headers_with_protocol("0")).unwrap_err();
+        let mismatch = check_client_protocol(&headers_with_protocol(
+            &(shared::PROTOCOL_VERSION - 1).to_string(),
+        ))
+        .unwrap_err();
         assert!(mismatch.client_outdated);
-        assert_eq!(mismatch.client_protocol_version, Some(0));
+        assert_eq!(
+            mismatch.client_protocol_version,
+            Some(shared::PROTOCOL_VERSION - 1)
+        );
     }
 
     #[test]
     fn newer_protocol_header_is_server_outdated() {
-        let mismatch = check_client_protocol(&headers_with_protocol("999")).unwrap_err();
+        let mismatch = check_client_protocol(&headers_with_protocol(
+            &(shared::PROTOCOL_VERSION + 1).to_string(),
+        ))
+        .unwrap_err();
         assert!(!mismatch.client_outdated);
-        assert_eq!(mismatch.client_protocol_version, Some(999));
+        assert_eq!(
+            mismatch.client_protocol_version,
+            Some(shared::PROTOCOL_VERSION + 1)
+        );
     }
 
     #[test]
@@ -612,10 +622,6 @@ mod tests {
         let info: shared::ServerInfo = serde_json::from_slice(&body_bytes(response).await).unwrap();
         assert_eq!(info.server_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(info.protocol_version, shared::PROTOCOL_VERSION);
-        assert_eq!(
-            info.min_client_protocol_version,
-            constants::MIN_CLIENT_PROTOCOL_VERSION
-        );
     }
 
     #[tokio::test]

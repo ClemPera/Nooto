@@ -27,10 +27,4 @@ git push origin main server-vX.Y.Z
 
 ## Protocol changes
 
-`shared/src/lib.rs` defines the wire protocol version. Bump `PROTOCOL_VERSION` only for breaking changes to paths, payloads, auth, or semantics. UI-only releases must not bump it. If the server stops accepting older clients, bump `MIN_CLIENT_PROTOCOL_VERSION` in `server/src/constants.rs` as well.
-
-For a protocol bump, release and deploy the server first. A new client refuses to sync with a server that does not expose `GET /version`. Verify the deployed server before tagging the client:
-
-```bash
-curl https://nooto.nextmiracle.eu/version
-```
+Bump `PROTOCOL_VERSION` only for breaking changes to paths, payloads, auth, or semantics; the server accepts exactly that version and rejects older clients. Most releases must not bump it.

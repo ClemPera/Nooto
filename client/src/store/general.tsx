@@ -19,7 +19,6 @@ export type ProtocolMismatch = {
   server: {
     server_version: string;
     protocol_version: number;
-    min_client_protocol_version: number;
   } | null;
 };
 

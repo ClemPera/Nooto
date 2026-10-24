@@ -85,7 +85,6 @@ describe("useGeneral", () => {
       server: {
         server_version: "0.2.0",
         protocol_version: 2,
-        min_client_protocol_version: 2,
       },
     };
 
