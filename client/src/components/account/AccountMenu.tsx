@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { syncStatusEnum, useGeneral } from "../../store/general";
 import { useModals } from "../../store/modals";
+import { useToasts } from "../../store/toasts";
 import { listen } from "@tauri-apps/api/event";
 import { trace } from "@tauri-apps/plugin-log";
 import { handleCommandError, extractMessage } from "../../lib/errors";
@@ -40,6 +41,12 @@ export default function AccountMenu() {
     listen<syncStatusEnum>("sync-status", (event) => {
       trace("sync status: " + event.payload);
       setSyncStatus(event.payload);
+    });
+
+    listen("session-expired", () => {
+      trace("session expired, prompting login");
+      const { addToast } = useToasts.getState();
+      addToast({ kind: "unauthorized", message: "Session expired, please log in again" });
     });
   }, []);
 

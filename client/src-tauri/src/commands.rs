@@ -471,9 +471,8 @@ pub async fn sync_login(
     Ok(())
 }
 
-/// Clears server credentials (token, instance, username) from the workspace without deleting notes.
-#[tauri::command(rename_all = "snake_case")]
-pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
+/// Clears the active workspace's server credentials in memory and in the database.
+pub async fn clear_session(state: &Mutex<AppState>) -> Result<(), CommandError> {
     let mut state = state.lock().await;
 
     let workspace = state
@@ -492,6 +491,12 @@ pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), Comman
     };
 
     Ok(())
+}
+
+/// Clears server credentials (token, instance, username) from the workspace without deleting notes.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
+    clear_session(&state).await
 }
 
 /// Fully removes the active workspace and all its notes from local storage.
@@ -671,11 +676,10 @@ pub async fn handle_conflict(
 
             let params = SelectNoteParams {
                 username,
-                token: hex::encode(token),
                 note_id: id,
             };
 
-            let note = sync::operations::select_note(params, instance).await?;
+            let note = sync::operations::select_note(params, &token, instance).await?;
 
             {
                 let conn = state.database.lock().await;
@@ -705,11 +709,10 @@ pub async fn handle_conflict(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes_gcm::{Aes256Gcm, KeyInit};
-    use argon2::password_hash::rand_core::OsRng;
+    use aes_gcm::{Aes256Gcm, aead::Generate};
 
     fn random_key() -> aes_gcm::Key<Aes256Gcm> {
-        Aes256Gcm::generate_key(OsRng)
+        aes_gcm::Key::<Aes256Gcm>::generate()
     }
 
     fn dummy_workspace(name: &str) -> Workspace {
