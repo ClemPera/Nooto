@@ -33,7 +33,7 @@ tokio = { version="1.48", features = ["rt-multi-thread", "macros"]}
 hex = "0.4"
 anyhow = "1.0"
 subtle = "2.6"
-tower_governor = "0.7"
+tower_governor = { version = "0.8", default-features = false, features = ["axum"] } # default-features now include tonic (useless here) 
 argon2 = { version = "0.5", features = ["std"] }
 
 [dev-dependencies]

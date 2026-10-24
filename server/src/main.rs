@@ -150,7 +150,7 @@ fn app(pool: Pool) -> anyhow::Result<Router> {
         // .route("/user_recovery", post()) //check recovery hash
         // .route("/data_recovery", get()) //Request recovery stuff
         // .route("/data_recovery", post()) //store new recovery stuff
-        .route_layer(GovernorLayer { config: auth_governor_conf });
+        .route_layer(GovernorLayer::new(auth_governor_conf));
 
     let api_routes = Router::new()
         .route("/notes", post(send_notes))
