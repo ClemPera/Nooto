@@ -38,5 +38,8 @@ tokio = "1.48"
 hex = "0.4"
 uuid = { version = "1.19", features = ["v7"] }
 
+[dev-dependencies]
+tokio = { version = "1.48", features = ["macros", "rt", "net"] }
+
 # [lints.rust]
 # unused_imports = "allow"

@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use shared::{LoginRequestParams, Note, SelectNoteParams, SelectNotesParams, SentNotes, User};
 
+use super::http_client;
+
 /// `POST /notes` — uploads a batch of notes and returns per-note results (Ok or Conflict).
 pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared::SentNotesResult>> {
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let response = client
         .post(instance + "/notes")
@@ -22,7 +24,7 @@ pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared
 
 /// `GET /notes` — fetches notes updated after the timestamp in `params`.
 pub async fn select_notes(params: SelectNotesParams, token: &[u8], instance: String) -> Result<Vec<Note>> {
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let response = client
         .get(instance + "/notes")
@@ -42,7 +44,7 @@ pub async fn select_notes(params: SelectNotesParams, token: &[u8], instance: Str
 
 /// `GET /note` — fetches a single note by UUID.
 pub async fn select_note(params: SelectNoteParams, token: &[u8], instance: String) -> Result<Note> {
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let response = client
         .get(instance + "/note")
@@ -62,7 +64,7 @@ pub async fn select_note(params: SelectNoteParams, token: &[u8], instance: Strin
 
 /// `POST /create_account` — registers a new user on the server.
 pub async fn create_account(user: User, instance: String) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     client
         .post(instance + "/create_account")
@@ -78,7 +80,7 @@ pub async fn create_account(user: User, instance: String) -> Result<()> {
 
 /// `GET /login` — retrieves the salts needed to derive the login hash before authenticating.
 pub async fn login_request(params: LoginRequestParams, instance: String) -> Result<shared::LoginRequest> {
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let response = client
         .get(instance + "/login")
@@ -97,7 +99,7 @@ pub async fn login_request(params: LoginRequestParams, instance: String) -> Resu
 
 /// `POST /login` — submits the login hash and returns the session token and MEK material.
 pub async fn login(params: shared::LoginParams, instance: String) -> Result<shared::Login> {
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let response = client
         .post(instance + "/login")
