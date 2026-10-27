@@ -26,6 +26,7 @@ from .metadata import (
 from .models import Metadata
 from .naming import validate_name
 from .prompts import prompt_optional, prompt_yes_no
+from .reset import drop_db
 from .restore.main import restore
 from .snapshots.both import save_both
 from .snapshots.cleanup import delete_db_artifact, delete_server_artifact
@@ -88,7 +89,7 @@ def cmd_list(*, include_all: bool = False, as_json: bool = False) -> None:
                 flags.append("MISSING")
             rows.append(
                 [
-                    truncate(_artifact_name(meta), 52),
+                    _artifact_name(meta),
                     truncate(str(checkout.get("branch") or "?"), 28),
                     str(checkout.get("short_commit") or "?"),
                     fmt_time(meta.get("created_at")),
@@ -129,7 +130,7 @@ def cmd_list(*, include_all: bool = False, as_json: bool = False) -> None:
             image = _section(meta, "image")
             server_rows.append(
                 [
-                    truncate(_artifact_name(meta), 52),
+                    _artifact_name(meta),
                     truncate(str(source_meta.get("branch") or "unknown"), 28),
                     str(source_meta.get("short_commit") or "?"),
                     fmt_time(meta.get("created_at")),
@@ -296,7 +297,8 @@ def interactive_menu() -> None:
         print("  6) List artifacts")
         print("  7) Show artifact")
         print("  8) Delete artifact")
-        print("  9) Quit")
+        print("  9) Drop current database (recreate)")
+        print(" 10) Quit")
         try:
             choice = input("> ").strip()
         except EOFError:
@@ -327,6 +329,8 @@ def interactive_menu() -> None:
                 if name:
                     cmd_delete(name)
             elif choice == "9":
+                drop_db(Docker())
+            elif choice == "10":
                 return
             else:
                 print("Unknown choice.")
@@ -337,7 +341,7 @@ def interactive_menu() -> None:
         except KeyboardInterrupt:
             print("\nInterrupted.")
             return
-        if choice in ("1", "2", "3", "4", "5", "6", "7", "8"):
+        if choice in ("1", "2", "3", "4", "5", "6", "7", "8", "9"):
             try:
                 input("\nPress Enter to continue...")
             except EOFError:

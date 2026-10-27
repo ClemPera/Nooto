@@ -15,6 +15,7 @@ from .commands import (
 from .docker import Docker
 from .errors import CliError
 from .metadata import acquire_lock
+from .reset import drop_db
 from .restore.main import restore
 from .snapshots.both import save_both
 from .snapshots.db import save_db
@@ -29,6 +30,7 @@ Examples:
   uv run --project scripts/server_versions server-versions list
   uv run --project scripts/server_versions server-versions restore --db <name> --server <name>
   uv run --project scripts/server_versions server-versions switch --db <name> --server current
+  uv run --project scripts/server_versions server-versions drop-db
 
 From scripts/server_versions, drop --project:
   uv run server-versions list
@@ -106,6 +108,11 @@ def build_parser() -> argparse.ArgumentParser:
     delete_parser.add_argument("--kind", choices=("both", "db", "server"), default="both")
     delete_parser.add_argument("--yes", action="store_true")
 
+    drop_db_parser = sub.add_parser("drop-db", help="Drop and recreate the current DB")
+    drop_db_parser.add_argument("--yes", action="store_true")
+    drop_db_parser.add_argument("--skip-backup", action="store_true")
+    drop_db_parser.add_argument("--no-start", action="store_true")
+
     return parser
 
 
@@ -156,6 +163,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "restore",
             "switch",
             "delete",
+            "drop-db",
         ):
             lock = acquire_lock()
     except (CliError, OSError) as exc:
@@ -200,6 +208,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd_show(args.name, as_json=args.json)
         elif args.command == "delete":
             cmd_delete(args.name, kind=args.kind, assume_yes=args.yes)
+        elif args.command == "drop-db":
+            drop_db(
+                Docker(),
+                assume_yes=args.yes,
+                skip_backup=args.skip_backup,
+                no_start=args.no_start,
+            )
         else:
             parser.print_help()
             return 2

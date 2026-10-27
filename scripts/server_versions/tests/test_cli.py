@@ -85,6 +85,22 @@ def test_list_flags() -> None:
     assert args.json is True
 
 
+def test_drop_db_defaults() -> None:
+    args = build_parser().parse_args(["drop-db"])
+    assert args.command == "drop-db"
+    assert args.yes is False
+    assert args.skip_backup is False
+    assert args.no_start is False
+
+
+def test_drop_db_flags() -> None:
+    args = build_parser().parse_args(["drop-db", "--yes", "--skip-backup", "--no-start"])
+    assert args.command == "drop-db"
+    assert args.yes is True
+    assert args.skip_backup is True
+    assert args.no_start is True
+
+
 def test_show_and_delete() -> None:
     parser = build_parser()
     show = parser.parse_args(["show", "dump", "--json"])

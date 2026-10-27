@@ -59,7 +59,7 @@ It requires Python 3.11 or newer. If the package is installed non-editable, set
 `NOOTO_ROOT` to the repository so the tool can find the compose project.
 
 Running without a subcommand opens the interactive menu. The menu offers save,
-restore, list, show, delete, and quit.
+restore, list, show, delete, drop database, and quit.
 
 ## Commands
 
@@ -166,7 +166,8 @@ uv run server-versions list --json
 ```
 
 `--all` includes automatic safety backups. `--json` prints the raw metadata. Rows
-are ordered newest first.
+are ordered newest first. Artifact names are printed in full so they can be copied
+into `show`, `delete`, and `restore`.
 
 ### `show`
 
@@ -195,6 +196,31 @@ Server image deletion is conservative:
 - If the image still has other tags, the command refuses and lists them. Remove
   those tags first.
 - If the image is already gone, the metadata is removed with a warning.
+
+### `drop-db`
+
+Drop the current database and recreate it empty, then restart the server so its
+migrations rebuild the schema.
+
+```sh
+uv run server-versions drop-db
+uv run server-versions drop-db --yes
+uv run server-versions drop-db --skip-backup
+uv run server-versions drop-db --no-start
+```
+
+Flags:
+
+- `--yes` accept prompts and run non-interactively
+- `--skip-backup` do not take a safety DB backup
+- `--no-start` leave the server stopped after the database is recreated
+
+The command refuses system databases. By default it takes an automatic backup
+named `pre-drop-<timestamp>`, stops the server, drops and recreates the database
+with the same charset and collation, then starts the server and waits for it to
+come back up. The server applies its migrations before it serves requests, so a
+successful start means the schema was rebuilt. Use `--no-start` to inspect the
+empty database first; the schema is rebuilt on the next server start.
 
 ## Artifact layout
 
@@ -231,8 +257,9 @@ running image source.
 
 ## Automatic backups and retention
 
-`save-both` and `restore` create automatic DB backups under `db/_auto/` before
-changing state. Names look like `pre-restore-20260101-120000`.
+`save-both`, `restore`, and `drop-db` create automatic DB backups under `db/_auto/`
+before changing state. Names look like `pre-restore-20260101-120000` or
+`pre-drop-20260101-120000`.
 
 The tool keeps the newest 5 automatic backups and prunes older ones. Automatic
 backups are hidden from `list` unless `--all` is passed. They are internal rollback
@@ -247,7 +274,10 @@ by `delete` or by partial-artifact cleanup.
 - Metadata is written atomically through a temporary file.
 - Restores verify checksums before touching the database.
 - Restores verify the database name and refuse system databases.
-- A safety backup is taken before restores and before restarting the server in `save-both`.
+- A safety backup is taken before restores, before restarting the server in
+  `save-both`, and before `drop-db` drops the database.
+- `drop-db` refuses system databases and preserves the database charset and
+  collation when it recreates the database.
 - Failed restores roll back the DB and the previous image when possible.
 - `save-db` removes the new dump and any captured image tag when metadata writing fails.
 - `save-server` and `save-both` remove the new snapshot tag and metadata when saving
@@ -284,6 +314,12 @@ Save the currently running image without rebuilding:
 
 ```sh
 uv run server-versions save-server --running
+```
+
+Reset the database to an empty schema and let the server rebuild it:
+
+```sh
+uv run server-versions drop-db
 ```
 
 ## Troubleshooting

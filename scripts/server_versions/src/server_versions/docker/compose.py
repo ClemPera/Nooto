@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -144,11 +145,10 @@ class DockerCompose(DockerBase):
         self.refresh_sudo()
         self.compose_run("up", "-d", "--wait", DB_SERVICE)
 
-    def db_query(self, sql: str, *, check: bool = True) -> str:
-        script = (
-            'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb -uroot -N -B '
-            '-e "$1" "$MARIADB_DATABASE"'
-        )
+    def _db_exec(self, sql: str, *, check: bool = True, use_database: bool = True) -> str:
+        script = 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb -uroot -N -B -e "$1"'
+        if use_database:
+            script += ' "$MARIADB_DATABASE"'
         proc = self.compose_run(
             "exec",
             "-T",
@@ -163,6 +163,12 @@ class DockerCompose(DockerBase):
             stderr=subprocess.PIPE,
         )
         return (proc.stdout or "").strip()
+
+    def db_query(self, sql: str, *, check: bool = True) -> str:
+        return self._db_exec(sql, check=check)
+
+    def db_exec_root(self, sql: str) -> None:
+        self._db_exec(sql, use_database=False)
 
     def db_exec(self, sql: str) -> None:
         self.db_query(sql)
@@ -212,6 +218,19 @@ class DockerCompose(DockerBase):
         self.db_exec(
             f"SET FOREIGN_KEY_CHECKS=0; DROP TABLE IF EXISTS {drops}; SET FOREIGN_KEY_CHECKS=1;"
         )
+
+    def drop_database(self) -> None:
+        database = self.db_name()
+        if database.lower() in SYSTEM_DATABASES:
+            raise CliError(f"Refusing to drop system database {database}.")
+        charset, collation = self.db_charset()
+        quoted = _quote_ident(database)
+        sql = f"DROP DATABASE IF EXISTS {quoted}; CREATE DATABASE {quoted}"
+        if charset and re.fullmatch(r"[A-Za-z0-9_]+", charset):
+            sql += f" CHARACTER SET {charset}"
+        if collation and re.fullmatch(r"[A-Za-z0-9_]+", collation):
+            sql += f" COLLATE {collation}"
+        self.db_exec_root(sql)
 
     def dump_db_to(self, out_file: _Writer) -> None:
         self.refresh_sudo()
