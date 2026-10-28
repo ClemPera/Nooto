@@ -75,6 +75,7 @@ Download the latest installer for your platform from the [Releases](https://gith
 - [Rust](https://rustup.rs/) (stable toolchain)
 - [Node.js](https://nodejs.org/) >= 20
 - [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS
+- JDK 21 for Android builds
 
 **Desktop:**
 
@@ -91,6 +92,8 @@ cd client
 npm install
 npm run tauri android build -- --apk
 ```
+
+The Android Gradle build is pinned to JDK 21 by `client/src-tauri/gen/android/gradle/gradle-daemon-jvm.properties`, generated with `./gradlew updateDaemonJvm --jvm-version=21` from `client/src-tauri/gen/android`.
 
 ---
 
