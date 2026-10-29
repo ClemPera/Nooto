@@ -1,6 +1,6 @@
 use anyhow::Context;
 use chrono::Local;
-use shared::{SelectNoteParams, SentNotes};
+use shared::{SelectNoteParams, ProtocolMismatch, SentNotes};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
@@ -27,6 +27,8 @@ pub enum ErrorKind {
     Network,
     /// The caller supplied an invalid value (bad UUID, empty name, etc.).
     InvalidInput,
+    /// The client and server protocol versions are incompatible.
+    UpgradeRequired,
 }
 
 /// Serialisable error returned to the frontend by every command.
@@ -58,7 +60,9 @@ impl CommandError {
 
 impl From<anyhow::Error> for CommandError {
     fn from(err: anyhow::Error) -> Self {
-        let kind = if err.downcast_ref::<reqwest::Error>().is_some() {
+        let kind = if err.downcast_ref::<ProtocolMismatch>().is_some() {
+            ErrorKind::UpgradeRequired
+        } else if err.downcast_ref::<reqwest::Error>().is_some() {
             ErrorKind::Network
         } else {
             ErrorKind::Internal
@@ -378,6 +382,10 @@ pub async fn sync_create_account(
 
     trace!("create account command received");
 
+    let instance: String = instance.context("Instance url is empty")?;
+
+    sync::version::ensure_server_compatible(&instance).await?;
+
     let state = state.lock().await;
 
     let workspace = state
@@ -389,7 +397,7 @@ pub async fn sync_create_account(
 
     trace!("create account: start creating");
 
-    sync::create_account(workspace, username, account, instance)
+    sync::create_account(workspace, username, account, Some(instance))
         .await?;
 
     debug!("account has been created");
@@ -410,14 +418,16 @@ pub async fn sync_login(
 ) -> Result<(), CommandError> {
     trace!("login command received");
 
+    let instance: String = instance.context("Instance url is empty")?;
+
+    sync::version::ensure_server_compatible(&instance).await?;
+
     let mut state = state.lock().await;
 
     let mut workspace = state
         .workspace
         .clone()
         .ok_or_else(|| CommandError::unauthorized("A workspace must be loaded before logging in"))?;
-
-    let instance: String = instance.context("Instance url is empty")?;
 
     let login_data = sync::login(username.clone(), password.clone(), instance.clone())
         .await?;
@@ -471,9 +481,8 @@ pub async fn sync_login(
     Ok(())
 }
 
-/// Clears server credentials (token, instance, username) from the workspace without deleting notes.
-#[tauri::command(rename_all = "snake_case")]
-pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
+/// Clears the active workspace's server credentials in memory and in the database.
+pub async fn clear_session(state: &Mutex<AppState>) -> Result<(), CommandError> {
     let mut state = state.lock().await;
 
     let workspace = state
@@ -492,6 +501,12 @@ pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), Comman
     };
 
     Ok(())
+}
+
+/// Clears server credentials (token, instance, username) from the workspace without deleting notes.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
+    clear_session(&state).await
 }
 
 /// Fully removes the active workspace and all its notes from local storage.
@@ -671,11 +686,10 @@ pub async fn handle_conflict(
 
             let params = SelectNoteParams {
                 username,
-                token: hex::encode(token),
                 note_id: id,
             };
 
-            let note = sync::operations::select_note(params, instance).await?;
+            let note = sync::operations::select_note(params, &token, instance).await?;
 
             {
                 let conn = state.database.lock().await;
@@ -705,11 +719,10 @@ pub async fn handle_conflict(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes_gcm::{Aes256Gcm, KeyInit};
-    use argon2::password_hash::rand_core::OsRng;
+    use aes_gcm::{Aes256Gcm, aead::Generate};
 
     fn random_key() -> aes_gcm::Key<Aes256Gcm> {
-        Aes256Gcm::generate_key(OsRng)
+        aes_gcm::Key::<Aes256Gcm>::generate()
     }
 
     fn dummy_workspace(name: &str) -> Workspace {

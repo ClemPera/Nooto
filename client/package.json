@@ -13,31 +13,31 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@dnd-kit/core": "^6.3.1",
-    "@tailwindcss/vite": "^4.1.16",
+    "@dnd-kit/core": "^6.3",
+    "@tailwindcss/vite": "^4.1",
     "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-log": "^2.7.0",
+    "@tauri-apps/plugin-log": "^2.7",
     "@tauri-apps/plugin-opener": "^2",
-    "@tiptap/markdown": "^3.22.1",
-    "@tiptap/react": "^3.22.1",
-    "@tiptap/starter-kit": "^3.22.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "tailwindcss": "^4.1.16",
-    "zustand": "^5.0.8"
+    "@tiptap/markdown": "^3.31",
+    "@tiptap/react": "^3.31",
+    "@tiptap/starter-kit": "^3.31",
+    "react": "^19.3",
+    "react-dom": "^19.3",
+    "tailwindcss": "^4.1",
+    "zustand": "^5.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
-    "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.2",
-    "@testing-library/user-event": "^14.6.1",
-    "@types/react": "^18.3.1",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^6.0.2",
-    "@vitest/coverage-v8": "^4.1.4",
-    "jsdom": "^29.0.2",
-    "typescript": "~5.6.2",
-    "vite": "^8.0.16",
-    "vitest": "^4.1.4"
+    "@tauri-apps/cli": "^2.11",
+    "@testing-library/jest-dom": "^7.0",
+    "@testing-library/react": "^16.3",
+    "@testing-library/user-event": "^14.6",
+    "@types/react": "^19.3",
+    "@types/react-dom": "^19.3",
+    "@vitejs/plugin-react": "^6.0",
+    "@vitest/coverage-v8": "^5.0",
+    "jsdom": "^30.1",
+    "typescript": "^5",
+    "vite": "^8.0",
+    "vitest": "^5.0"
   }
 }

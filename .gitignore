@@ -26,3 +26,10 @@ target
 .env
 
 db_data/
+*.sql
+.server-snapshots/
+__pycache__/
+scripts/server_versions/.venv/
+scripts/server_versions/.mypy_cache/
+scripts/server_versions/.pytest_cache/
+scripts/server_versions/.ruff_cache/
