@@ -164,8 +164,16 @@ Nooto/
 │   └── src-tauri/      # Rust Tauri backend (local DB, crypto, sync)
 ├── server/             # Axum HTTP sync server
 ├── shared/             # Shared Rust types (serialization)
+├── scripts/            # Dev tools (server version snapshots)
 └── docker-compose.yml
 ```
+
+### Development tools
+
+`scripts/server_versions/` is a dev-only uv project that snapshots and restores
+the server database and Docker image. It is not needed to build or run Nooto.
+See [scripts/server_versions/README.md](scripts/server_versions/README.md) for
+setup and usage.
 
 ---
 
