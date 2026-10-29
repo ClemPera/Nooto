@@ -7,6 +7,7 @@ use crate::{crypt, db::schema::Workspace};
 
 pub mod operations;
 pub mod service;
+pub mod version;
 
 /// Timeout for establishing a connection to the server.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
