@@ -83,6 +83,14 @@ pub fn is_duplicate_entry(err: &anyhow::Error) -> bool {
     )
 }
 
+/// `harden_login_hash` on the blocking pool, so Argon2 never stalls an async worker.
+pub async fn harden_login_hash_blocking(login_hash: String) -> Result<String, AppError> {
+    let hashed = tokio::task::spawn_blocking(move || harden_login_hash(&login_hash))
+        .await
+        .map_err(|e| AppError::internal(anyhow::anyhow!("Login hash task failed: {e}")))?;
+    Ok(hashed?)
+}
+
 /// Verifies login_hash against a hardened (Argon2id) stored_password_hash.
 pub fn verify_login_hash(login_hash: &str, stored_password_hash: &str) -> Result<bool, AppError> {
     let parsed = PasswordHash::new(stored_password_hash).map_err(|e| {
@@ -92,6 +100,18 @@ pub fn verify_login_hash(login_hash: &str, stored_password_hash: &str) -> Result
     Ok(Argon2::default()
         .verify_password(login_hash.as_bytes(), &parsed)
         .is_ok())
+}
+
+/// `verify_login_hash` on the blocking pool, so Argon2 never stalls an async worker.
+pub async fn verify_login_hash_blocking(
+    login_hash: &str,
+    stored_password_hash: &str,
+) -> Result<bool, AppError> {
+    let login_hash = login_hash.to_owned();
+    let stored_password_hash = stored_password_hash.to_owned();
+    tokio::task::spawn_blocking(move || verify_login_hash(&login_hash, &stored_password_hash))
+        .await
+        .map_err(|e| AppError::internal(anyhow::anyhow!("Login hash verification task failed: {e}")))?
 }
 
 /// One-time migration: rehashes accounts below CURRENT_PASSWORD_HASH_VERSION, then becomes a no-op.

@@ -363,10 +363,7 @@ async fn insert_user(
 
     // Argon2 blocks for tens of ms; keep it off the async workers.
     let login_hash = std::mem::take(&mut user.stored_password_hash);
-    let hardened = tokio::task::spawn_blocking(move || utils::harden_login_hash(&login_hash))
-        .await
-        .map_err(|e| AppError::internal(anyhow::anyhow!("Login hash task failed: {e}")))?;
-    user.stored_password_hash = hardened?;
+    user.stored_password_hash = utils::harden_login_hash_blocking(login_hash).await?;
     user.password_hash_version = constants::CURRENT_PASSWORD_HASH_VERSION;
 
     user.insert(&mut conn).await.map_err(|err| {
@@ -427,11 +424,20 @@ async fn login(
 
     // Same response for missing user and wrong password to avoid enumeration (CWE-203).
     let user = match user {
-        Some(user) if utils::verify_login_hash(&params.login_hash, &user.stored_password_hash)? => user,
-        Some(_) => return Err(AppError::unauthorized("Invalid username or password")),
+        Some(user) => {
+            let valid = utils::verify_login_hash_blocking(
+                &params.login_hash,
+                &user.stored_password_hash,
+            )
+            .await?;
+            if !valid {
+                return Err(AppError::unauthorized("Invalid username or password"));
+            }
+            user
+        }
         None => {
             // Burn the same Argon2 cost as a real account so timing doesn't reveal existence.
-            utils::verify_login_hash(&params.login_hash, utils::dummy_login_hash()?)?;
+            utils::verify_login_hash_blocking(&params.login_hash, utils::dummy_login_hash()?).await?;
             return Err(AppError::unauthorized("Invalid username or password"));
         }
     };
