@@ -16,6 +16,12 @@ use crate::AppError;
 use crate::constants;
 use crate::schema;
 
+/// Name of the `server_secret` row holding the fake-salt HMAC key.
+const FAKE_SALT_SECRET_NAME: &str = "fake_login_salt";
+
+static FAKE_SALT_SECRET: OnceLock<Vec<u8>> = OnceLock::new();
+static DUMMY_LOGIN_HASH: OnceLock<String> = OnceLock::new();
+
 /// Verifies `token` is valid and not idle-expired for `username`.
 pub async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Result<(), AppError> {
     //TODO: this could return user honestly
@@ -120,12 +126,6 @@ pub async fn rehash_legacy_password_hashes(pool: &Pool) -> anyhow::Result<()> {
 
     Ok(())
 }
-
-/// Name of the `server_secret` row holding the fake-salt HMAC key.
-const FAKE_SALT_SECRET_NAME: &str = "fake_login_salt";
-
-static FAKE_SALT_SECRET: OnceLock<Vec<u8>> = OnceLock::new();
-static DUMMY_LOGIN_HASH: OnceLock<String> = OnceLock::new();
 
 /// Loads the fake-salt HMAC key from the DB, creating it on first startup.
 pub async fn load_or_create_fake_salt_secret(pool: &Pool) -> anyhow::Result<()> {
