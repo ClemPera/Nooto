@@ -1,12 +1,11 @@
 use std::env;
+use std::fs;
 
 use tokio::sync::Mutex;
 
 use rusqlite::Connection;
 use tauri::Manager;
 use tauri_plugin_log::log::LevelFilter;
-
-use std::fs;
 
 mod commands;
 mod crypt;
@@ -30,17 +29,17 @@ pub fn run() {
         .unwrap_or(LevelFilter::Info);
 
     tauri::Builder::default()
-        .plugin(
-            tauri_plugin_log::Builder::new()
-                .level(log_level)
-                .build(),
-        )
+        .plugin(tauri_plugin_log::Builder::new().level(log_level).build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Debug builds (`tauri dev`) use a separate database file so running the dev
             // build alongside an installed release build on the same device doesn't
             // corrupt either one's data.
-            let db_filename = if cfg!(debug_assertions) { "nooto-dev.db" } else { "nooto.db" };
+            let db_filename = if cfg!(debug_assertions) {
+                "nooto-dev.db"
+            } else {
+                "nooto.db"
+            };
 
             let db_path = app
                 .path()
@@ -48,7 +47,8 @@ pub fn run() {
                 .map_err(|e| anyhow::anyhow!("Failed to get app data directory: {e}"))?
                 .join(db_filename);
 
-            fs::create_dir_all(db_path.parent().unwrap()).map_err(|e| format!("Failed to create db parent directory: {e:#}"))?;
+            fs::create_dir_all(db_path.parent().unwrap())
+                .map_err(|e| format!("Failed to create db parent directory: {e:#}"))?;
 
             let database = db::init(db_path)
                 .map_err(|e| anyhow::anyhow!("Failed to initialise database: {e:#}"))?;
