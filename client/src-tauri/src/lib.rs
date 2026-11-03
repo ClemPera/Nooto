@@ -1,6 +1,5 @@
 use std::env;
 
-use anyhow::Context;
 use tokio::sync::Mutex;
 
 use rusqlite::Connection;
