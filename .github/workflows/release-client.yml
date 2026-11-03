@@ -29,8 +29,7 @@ jobs:
           - runner: macos-latest
             os: macos
             arch: universal
-            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
-            tauri-args: '--target universal-apple-darwin'
+            tauri-args: '--target aarch64-apple-darwin'
             binary: nooto
 
           - runner: windows-latest
