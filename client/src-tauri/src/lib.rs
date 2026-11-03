@@ -1,11 +1,13 @@
 use std::env;
 
+use anyhow::Context;
 use tokio::sync::Mutex;
 
 use rusqlite::Connection;
 use tauri::Manager;
 use tauri_plugin_log::log::LevelFilter;
 
+use std::fs;
 
 mod commands;
 mod crypt;
@@ -46,6 +48,8 @@ pub fn run() {
                 .app_data_dir()
                 .map_err(|e| anyhow::anyhow!("Failed to get app data directory: {e}"))?
                 .join(db_filename);
+
+            fs::create_dir_all(db_path.parent().unwrap()).map_err(|e| format!("Failed to create db parent directory: {e:#}"))?;
 
             let database = db::init(db_path)
                 .map_err(|e| anyhow::anyhow!("Failed to initialise database: {e:#}"))?;
