@@ -27,6 +27,7 @@ target
 
 db_data/
 *.sql
+!server/migrations/*.sql
 .server-snapshots/
 __pycache__/
 scripts/server_versions/.venv/

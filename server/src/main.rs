@@ -114,6 +114,13 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to rehash legacy password hashes")?;
 
+    utils::load_or_create_fake_salt_secret(&pool)
+        .await
+        .context("Failed to load fake salt secret")?;
+
+    utils::init_dummy_login_hash()
+        .context("Failed to initialise dummy login hash")?;
+
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
         .expect("Failed to bind TCP listener");
@@ -372,14 +379,19 @@ async fn login_request(
         .await
         .context("Failed to get DB connection")?;
 
-    let user = schema::User::select(&mut conn, params.username)
-        .await
-        .map_err(AppError::from)?
-        .ok_or_else(||AppError::not_found("User doesn't exist"))?;
+    // Fake salts for unknown usernames so the endpoint can't confirm account existence (CWE-203).
+    let (salt_auth, salt_server_auth) =
+        match schema::User::select(&mut conn, params.username.clone())
+            .await
+            .map_err(AppError::from)?
+        {
+            Some(user) => (user.salt_auth, user.salt_server_auth),
+            None => utils::fake_login_salts(&params.username)?,
+        };
 
     Ok(Json(shared::LoginRequest {
-        salt_auth: user.salt_auth,
-        salt_server_auth: user.salt_server_auth,
+        salt_auth,
+        salt_server_auth,
     }))
 }
 
@@ -402,7 +414,12 @@ async fn login(
     // Same response for missing user and wrong password to avoid enumeration (CWE-203).
     let user = match user {
         Some(user) if utils::verify_login_hash(&params.login_hash, &user.stored_password_hash)? => user,
-        _ => return Err(AppError::unauthorized("Invalid username or password")),
+        Some(_) => return Err(AppError::unauthorized("Invalid username or password")),
+        None => {
+            // Burn the same Argon2 cost as a real account so timing doesn't reveal existence.
+            utils::verify_login_hash(&params.login_hash, utils::dummy_login_hash()?)?;
+            return Err(AppError::unauthorized("Invalid username or password"));
+        }
     };
 
     let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
