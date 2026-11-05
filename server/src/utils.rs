@@ -75,6 +75,22 @@ pub fn harden_login_hash(login_hash: &str) -> anyhow::Result<String> {
         .map_err(|e| anyhow::anyhow!("Failed to hash login_hash: {e}"))
 }
 
+/// True when the error is MySQL `ER_DUP_ENTRY`, i.e. a unique index rejected the insert.
+pub fn is_duplicate_entry(err: &anyhow::Error) -> bool {
+    matches!(
+        err.downcast_ref::<mysql_async::Error>(),
+        Some(mysql_async::Error::Server(e)) if e.code == 1062
+    )
+}
+
+/// `harden_login_hash` on the blocking pool, so Argon2 never stalls an async worker.
+pub async fn harden_login_hash_blocking(login_hash: String) -> Result<String, AppError> {
+    let hashed = tokio::task::spawn_blocking(move || harden_login_hash(&login_hash))
+        .await
+        .map_err(|e| AppError::internal(anyhow::anyhow!("Login hash task failed: {e}")))?;
+    Ok(hashed?)
+}
+
 /// Verifies login_hash against a hardened (Argon2id) stored_password_hash.
 pub fn verify_login_hash(login_hash: &str, stored_password_hash: &str) -> Result<bool, AppError> {
     let parsed = PasswordHash::new(stored_password_hash).map_err(|e| {
@@ -84,6 +100,18 @@ pub fn verify_login_hash(login_hash: &str, stored_password_hash: &str) -> Result
     Ok(Argon2::default()
         .verify_password(login_hash.as_bytes(), &parsed)
         .is_ok())
+}
+
+/// `verify_login_hash` on the blocking pool, so Argon2 never stalls an async worker.
+pub async fn verify_login_hash_blocking(
+    login_hash: &str,
+    stored_password_hash: &str,
+) -> Result<bool, AppError> {
+    let login_hash = login_hash.to_owned();
+    let stored_password_hash = stored_password_hash.to_owned();
+    tokio::task::spawn_blocking(move || verify_login_hash(&login_hash, &stored_password_hash))
+        .await
+        .map_err(|e| AppError::internal(anyhow::anyhow!("Login hash verification task failed: {e}")))?
 }
 
 /// One-time migration: rehashes accounts below CURRENT_PASSWORD_HASH_VERSION, then becomes a no-op.
@@ -261,6 +289,38 @@ mod tests {
         assert_ne!(first, second);
         assert!(verify_login_hash("hunter2", &first).unwrap());
         assert!(verify_login_hash("hunter2", &second).unwrap());
+    }
+
+    // --- is_duplicate_entry ---
+
+    fn server_error(code: u16) -> anyhow::Error {
+        mysql_async::Error::Server(mysql_async::ServerError {
+            code,
+            message: "duplicate".to_string(),
+            state: "23000".to_string(),
+        })
+        .into()
+    }
+
+    #[test]
+    fn duplicate_entry_matches_1062() {
+        assert!(is_duplicate_entry(&server_error(1062)));
+    }
+
+    #[test]
+    fn duplicate_entry_matches_through_context() {
+        let err = server_error(1062).context("Failed to insert user");
+        assert!(is_duplicate_entry(&err));
+    }
+
+    #[test]
+    fn duplicate_entry_ignores_other_server_errors() {
+        assert!(!is_duplicate_entry(&server_error(1452)));
+    }
+
+    #[test]
+    fn duplicate_entry_ignores_unrelated_errors() {
+        assert!(!is_duplicate_entry(&anyhow::anyhow!("nope")));
     }
 
     // --- verify_login_hash ---

@@ -350,19 +350,30 @@ async fn insert_user(
 ) -> Result<(), AppError> {
     println!("received insert_user");
     let mut user: schema::User = user.into();
-    user.stored_password_hash = utils::harden_login_hash(&user.stored_password_hash)?;
-    user.password_hash_version = constants::CURRENT_PASSWORD_HASH_VERSION;
 
     let mut conn = pool
         .get_conn()
         .await
         .context("Failed to get DB connection")?;
 
-    if User::select(&mut conn, user.clone().username).await?.is_some() {
+    // Checked before hashing: a taken username must not cost an Argon2 run.
+    if User::select(&mut conn, user.username.clone()).await?.is_some() {
         return Err(AppError::conflict("This username already exist"))
     }
 
-    user.insert(&mut conn).await.map_err(AppError::from)?;
+    // Argon2 blocks for tens of ms; keep it off the async workers.
+    let login_hash = std::mem::take(&mut user.stored_password_hash);
+    user.stored_password_hash = utils::harden_login_hash_blocking(login_hash).await?;
+    user.password_hash_version = constants::CURRENT_PASSWORD_HASH_VERSION;
+
+    user.insert(&mut conn).await.map_err(|err| {
+        // A concurrent registration can still pass the check above and lose here.
+        if utils::is_duplicate_entry(&err) {
+            AppError::conflict("This username already exist")
+        } else {
+            AppError::from(err)
+        }
+    })?;
 
     println!("insert_user: completed");
 
@@ -413,11 +424,20 @@ async fn login(
 
     // Same response for missing user and wrong password to avoid enumeration (CWE-203).
     let user = match user {
-        Some(user) if utils::verify_login_hash(&params.login_hash, &user.stored_password_hash)? => user,
-        Some(_) => return Err(AppError::unauthorized("Invalid username or password")),
+        Some(user) => {
+            let valid = utils::verify_login_hash_blocking(
+                &params.login_hash,
+                &user.stored_password_hash,
+            )
+            .await?;
+            if !valid {
+                return Err(AppError::unauthorized("Invalid username or password"));
+            }
+            user
+        }
         None => {
             // Burn the same Argon2 cost as a real account so timing doesn't reveal existence.
-            utils::verify_login_hash(&params.login_hash, utils::dummy_login_hash()?)?;
+            utils::verify_login_hash_blocking(&params.login_hash, utils::dummy_login_hash()?).await?;
             return Err(AppError::unauthorized("Invalid username or password"));
         }
     };
