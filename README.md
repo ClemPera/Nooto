@@ -80,6 +80,7 @@ Download the latest installer for your platform from the [Releases](https://gith
 - [Rust](https://rustup.rs/) (stable toolchain)
 - [Node.js](https://nodejs.org/) >= 20
 - [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS
+- JDK 21 for Android builds
 
 **Desktop:**
 
@@ -96,6 +97,8 @@ cd client
 npm install
 npm run tauri android build -- --apk
 ```
+
+The Android Gradle build is pinned to JDK 21 by `client/src-tauri/gen/android/gradle/gradle-daemon-jvm.properties`, generated with `./gradlew updateDaemonJvm --jvm-version=21` from `client/src-tauri/gen/android`.
 
 ---
 
@@ -166,8 +169,16 @@ Nooto/
 │   └── src-tauri/      # Rust Tauri backend (local DB, crypto, sync)
 ├── server/             # Axum HTTP sync server
 ├── shared/             # Shared Rust types (serialization)
+├── scripts/            # Dev tools (server version snapshots)
 └── docker-compose.yml
 ```
+
+### Development tools
+
+`scripts/server_versions/` is a dev-only uv project that snapshots and restores
+the server database and Docker image. It is not needed to build or run Nooto.
+See [scripts/server_versions/README.md](scripts/server_versions/README.md) for
+setup and usage.
 
 ---
 
