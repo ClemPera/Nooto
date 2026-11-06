@@ -48,7 +48,7 @@ pub fn run() {
                 .join(db_filename);
 
             fs::create_dir_all(db_path.parent().unwrap())
-                .map_err(|e| format!("Failed to create db parent directory: {e:#}"))?;
+                .map_err(|e| anyhow::anyhow!("Failed to create db parent directory: {e:#}"))?;
 
             let database = db::init(db_path)
                 .map_err(|e| anyhow::anyhow!("Failed to initialise database: {e:#}"))?;
