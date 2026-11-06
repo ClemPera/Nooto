@@ -362,10 +362,18 @@ async fn insert_user(
         return Err(AppError::conflict("This username already exist"))
     }
 
+    // Release the pooled connection while Argon2 runs, so hashing never pins a slot.
+    drop(conn);
+
     // Argon2 blocks for tens of ms; keep it off the async workers.
     let login_hash = std::mem::take(&mut user.stored_password_hash);
     user.stored_password_hash = utils::harden_login_hash_blocking(login_hash).await?;
     user.password_hash_version = constants::CURRENT_PASSWORD_HASH_VERSION;
+
+    let mut conn = pool
+        .get_conn()
+        .await
+        .context("Failed to get DB connection")?;
 
     user.insert(&mut conn).await.map_err(|err| {
         // A concurrent registration can still pass the check above and lose here.
@@ -423,6 +431,9 @@ async fn login(
         .await
         .map_err(AppError::from)?;
 
+    // Release the pooled connection while Argon2 runs, so hashing never pins a slot.
+    drop(conn);
+
     // Same response for missing user and wrong password to avoid enumeration (CWE-203).
     let user = match user {
         Some(user) => {
@@ -456,6 +467,11 @@ async fn login(
         token,
         last_used_at: chrono::Local::now().to_utc().timestamp(),
     };
+
+    let mut conn = pool
+        .get_conn()
+        .await
+        .context("Failed to get DB connection")?;
 
     user_token.insert(&mut conn).await.map_err(AppError::from)?;
 
