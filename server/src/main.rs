@@ -1,4 +1,3 @@
-use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -15,14 +14,16 @@ use dotenvy::dotenv;
 use mysql_async::Pool;
 use rand::{TryRng, rngs::SysRng};
 use shared::SentNotesResult;
-use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor};
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 
+use crate::rate_limit::TrustedProxyIpKeyExtractor;
 use crate::schema::User;
 
 mod utils;
 mod schema;
 mod migrations;
 mod constants;
+mod rate_limit;
 
 /// Application error returned by all handlers.
 /// Internal errors are logged server-side and return a generic 500 to the client.
@@ -94,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     //Env var should be like mysql://user:pass%20word@localhost/database_name
     let pool = Pool::new(
-        env::var("DATABASE_URL")
+        dotenvy::var("DATABASE_URL")
             .expect("DATABASE_URL must be set")
             .as_str(),
     );
@@ -140,7 +141,7 @@ fn app(pool: Pool) -> anyhow::Result<Router> {
     // Rate-limited below: /login and /create_account are what an attacker would brute-force.
     let auth_governor_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .key_extractor(SmartIpKeyExtractor)
+            .key_extractor(TrustedProxyIpKeyExtractor::from_env()?)
             .per_second(4)
             .burst_size(5)
             .finish()
