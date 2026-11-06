@@ -5,7 +5,7 @@ use anyhow::Context;
 use axum::{
     Json, Router,
     extract::{Query, Request as AxumRequest, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -31,6 +31,7 @@ mod rate_limit;
 pub struct AppError {
     status: StatusCode,
     message: String,
+    retry_after: Option<u64>,
 }
 
 //TODO: impl logging (info for most error)
@@ -41,22 +42,35 @@ impl AppError {
         AppError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: "Internal server error".to_string(),
+            retry_after: None,
         }
     }
 
     /// 404 with a caller-supplied message.
     pub fn not_found(msg: impl Into<String>) -> Self {
-        AppError { status: StatusCode::NOT_FOUND, message: msg.into() }
+        AppError {
+            status: StatusCode::NOT_FOUND,
+            message: msg.into(),
+            retry_after: None,
+        }
     }
 
     /// 401 with a caller-supplied message.
     pub fn unauthorized(msg: impl Into<String>) -> Self {
-        AppError { status: StatusCode::UNAUTHORIZED, message: msg.into() }
+        AppError {
+            status: StatusCode::UNAUTHORIZED,
+            message: msg.into(),
+            retry_after: None,
+        }
     }
 
     /// 403 — used when the token is present but doesn't match.
     pub fn forbidden() -> Self {
-        AppError { status: StatusCode::FORBIDDEN, message: "Forbidden".to_string() }
+        AppError {
+            status: StatusCode::FORBIDDEN,
+            message: "Forbidden".to_string(),
+            retry_after: None,
+        }
     }
 
     /// 422 — used when an expected entity (e.g. the user record) is missing mid-request.
@@ -64,23 +78,49 @@ impl AppError {
         AppError {
             status: StatusCode::UNPROCESSABLE_ENTITY,
             message: "Unprocessable entity".to_string(),
+            retry_after: None,
         }
     }
-    
+
     /// 409 — used when a resource already exists (e.g. duplicate username).
     pub fn conflict(msg: impl Into<String>) -> Self {
-        AppError { status: StatusCode::CONFLICT, message: msg.into() }
+        AppError {
+            status: StatusCode::CONFLICT,
+            message: msg.into(),
+            retry_after: None,
+        }
     }
 
     /// 400 with a caller-supplied message (e.g. malformed token).
     pub fn bad_request(msg: impl Into<String>) -> Self {
-        AppError { status: StatusCode::BAD_REQUEST, message: msg.into() }
+        AppError {
+            status: StatusCode::BAD_REQUEST,
+            message: msg.into(),
+            retry_after: None,
+        }
+    }
+
+    /// 503 with `Retry-After: 1` — a shared resource is saturated, the client should back off.
+    pub fn service_unavailable(msg: impl Into<String>) -> Self {
+        AppError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: msg.into(),
+            retry_after: Some(1),
+        }
     }
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        (self.status, self.message).into_response()
+        let mut response = (self.status, self.message).into_response();
+
+        if let Some(retry_after) = self.retry_after {
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from(retry_after));
+        }
+
+        response
     }
 }
 
@@ -121,6 +161,8 @@ async fn main() -> anyhow::Result<()> {
 
     utils::init_dummy_login_hash()
         .context("Failed to initialise dummy login hash")?;
+
+    utils::init_argon2_limiter()?;
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
@@ -352,6 +394,9 @@ async fn insert_user(
     println!("received insert_user");
     let mut user: schema::User = user.into();
 
+    // Taken before get_conn: waiting logins must not hold a pooled connection while they wait.
+    let _permit = utils::try_acquire_argon2_permit()?;
+
     let mut conn = pool
         .get_conn()
         .await
@@ -422,6 +467,9 @@ async fn login(
     State(pool): State<Pool>,
     Json(params): Json<shared::LoginParams>,
 ) -> Result<Json<shared::Login>, AppError> {
+    // Taken before get_conn: waiting logins must not hold a pooled connection while they wait.
+    let _permit = utils::try_acquire_argon2_permit()?;
+
     let mut conn = pool
         .get_conn()
         .await
@@ -565,6 +613,26 @@ mod tests {
         let e = AppError::bad_request("invalid input");
         assert_eq!(e.status, StatusCode::BAD_REQUEST);
         assert_eq!(e.message, "invalid input");
+    }
+
+    #[test]
+    fn app_error_service_unavailable() {
+        let e = AppError::service_unavailable("busy");
+        assert_eq!(e.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(e.message, "busy");
+        assert_eq!(e.retry_after, Some(1));
+    }
+
+    #[test]
+    fn service_unavailable_sets_retry_after_header() {
+        let response = AppError::service_unavailable("busy").into_response();
+        assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+    }
+
+    #[test]
+    fn other_errors_have_no_retry_after_header() {
+        let response = AppError::not_found("nope").into_response();
+        assert!(response.headers().get(header::RETRY_AFTER).is_none());
     }
 
     // --- From<anyhow::Error> ---

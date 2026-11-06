@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Context;
 use argon2::{
@@ -11,6 +11,7 @@ use mysql_async::{Conn, Pool, params, prelude::Queryable};
 use rand::{TryRng, rngs::SysRng};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError};
 
 use crate::AppError;
 use crate::constants;
@@ -19,8 +20,87 @@ use crate::schema;
 /// Name of the `server_secret` row holding the fake-salt HMAC key.
 const FAKE_SALT_SECRET_NAME: &str = "fake_login_salt";
 
+/// Env var holding the memory budget shared by concurrent Argon2 runs, in MiB.
+const ARGON2_MEMORY_ENV: &str = "NOOTO_ARGON2_MEMORY_MIB";
+
+/// Memory cost of one Argon2 hash, derived from the crate default (19 MiB).
+const MIB_PER_HASH: usize = argon2::Params::DEFAULT_M_COST as usize / 1024;
+
+/// Memory budget, in MiB, used when `NOOTO_ARGON2_MEMORY_MIB` is unset.
+const DEFAULT_ARGON2_MEMORY_MIB: usize = 256;
+
 static FAKE_SALT_SECRET: OnceLock<Vec<u8>> = OnceLock::new();
 static DUMMY_LOGIN_HASH: OnceLock<String> = OnceLock::new();
+static ARGON2_LIMITER: OnceLock<Result<Arc<Semaphore>, String>> = OnceLock::new();
+
+/// Fails fast at startup when the Argon2 budget is misconfigured.
+pub fn init_argon2_limiter() -> anyhow::Result<()> {
+    let permits = argon2_permits_from_env()?;
+
+    // Already built by an earlier call; the configured budget is identical either way.
+    let _ = ARGON2_LIMITER.set(Ok(Arc::new(Semaphore::new(permits))));
+
+    Ok(())
+}
+
+/// Takes one Argon2 slot, or fails immediately when every slot is busy.
+pub fn try_acquire_argon2_permit() -> Result<OwnedSemaphorePermit, AppError> {
+    match argon2_limiter()?.try_acquire_owned() {
+        Ok(permit) => Ok(permit),
+        Err(TryAcquireError::NoPermits) => {
+            Err(AppError::service_unavailable("Server busy, try again later"))
+        }
+        Err(TryAcquireError::Closed) => {
+            Err(AppError::internal(anyhow::anyhow!("Argon2 limiter closed")))
+        }
+    }
+}
+
+/// Shared limiter, built once from the configured memory budget.
+fn argon2_limiter() -> Result<Arc<Semaphore>, AppError> {
+    ARGON2_LIMITER
+        .get_or_init(|| {
+            argon2_permits_from_env()
+                .map(|permits| Arc::new(Semaphore::new(permits)))
+                .map_err(|err| err.to_string())
+        })
+        .clone()
+        .map_err(|err| AppError::internal(anyhow::anyhow!("Invalid {ARGON2_MEMORY_ENV}: {err}")))
+}
+
+fn argon2_permits_from_env() -> anyhow::Result<usize> {
+    let raw = match dotenvy::var(ARGON2_MEMORY_ENV) {
+        Ok(raw) => Some(raw),
+        Err(dotenvy::Error::EnvVar(std::env::VarError::NotPresent)) => None,
+        Err(err) => {
+            return Err(anyhow::Error::new(err).context(format!("Invalid {ARGON2_MEMORY_ENV}")))
+        }
+    };
+
+    Ok(parse_argon2_budget(raw.as_deref())? / MIB_PER_HASH)
+}
+
+fn parse_argon2_budget(raw: Option<&str>) -> anyhow::Result<usize> {
+    let Some(raw) = raw else {
+        return Ok(DEFAULT_ARGON2_MEMORY_MIB);
+    };
+
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(DEFAULT_ARGON2_MEMORY_MIB);
+    }
+
+    let budget: usize = raw
+        .parse()
+        .with_context(|| format!("{ARGON2_MEMORY_ENV} must be an integer number of MiB"))?;
+
+    anyhow::ensure!(
+        budget >= MIB_PER_HASH,
+        "{ARGON2_MEMORY_ENV} must be at least {MIB_PER_HASH} MiB"
+    );
+
+    Ok(budget)
+}
 
 /// Verifies `token` is valid and not idle-expired for `username`.
 pub async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Result<(), AppError> {
@@ -370,6 +450,51 @@ mod tests {
         assert_eq!(salt_auth.len(), 22);
         assert!(SaltString::from_b64(&salt_auth).is_ok());
         assert!(SaltString::from_b64(&salt_server_auth).is_ok());
+    }
+
+    // --- argon2 limiter ---
+
+    #[test]
+    fn argon2_budget_defaults_to_256_mib() {
+        assert_eq!(parse_argon2_budget(None).unwrap(), 256);
+        assert_eq!(parse_argon2_budget(Some("")).unwrap(), 256);
+        assert_eq!(parse_argon2_budget(Some("  ")).unwrap(), 256);
+    }
+
+    #[test]
+    fn argon2_budget_accepts_explicit_values() {
+        assert_eq!(parse_argon2_budget(Some("512")).unwrap(), 512);
+    }
+
+    #[test]
+    fn argon2_budget_rejects_values_below_one_hash() {
+        let too_small = (MIB_PER_HASH - 1).to_string();
+        assert!(parse_argon2_budget(Some(&too_small)).is_err());
+    }
+
+    #[test]
+    fn argon2_budget_rejects_non_numeric_values() {
+        assert!(parse_argon2_budget(Some("lots")).is_err());
+    }
+
+    #[test]
+    fn default_budget_yields_the_documented_permit_count() {
+        assert_eq!(DEFAULT_ARGON2_MEMORY_MIB / MIB_PER_HASH, 13);
+    }
+
+    #[test]
+    fn saturated_limiter_returns_503_with_retry_after() {
+        let limiter = argon2_limiter().unwrap();
+        let mut held = Vec::new();
+        while let Ok(permit) = limiter.clone().try_acquire_owned() {
+            held.push(permit);
+        }
+
+        let err = try_acquire_argon2_permit().unwrap_err();
+        assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(err.retry_after, Some(1));
+
+        drop(held);
     }
 
     // --- bearer_token_from_headers ---
