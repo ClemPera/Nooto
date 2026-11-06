@@ -1,4 +1,5 @@
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use anyhow::Context;
 use argon2::{
@@ -102,6 +103,60 @@ fn parse_argon2_budget(raw: Option<&str>) -> anyhow::Result<usize> {
     Ok(budget)
 }
 
+/// Failure while taking a connection from the pool.
+#[derive(Debug)]
+pub enum PoolError {
+    /// No connection became available before the deadline.
+    Timeout,
+    /// The pool or the server returned an error.
+    Db(mysql_async::Error),
+}
+
+impl std::fmt::Display for PoolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PoolError::Timeout => write!(
+                f,
+                "Timed out after {}s waiting for a database connection",
+                constants::DB_CONN_TIMEOUT_SECS
+            ),
+            PoolError::Db(err) => write!(f, "Failed to get DB connection: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for PoolError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            PoolError::Db(err) => Some(err),
+            PoolError::Timeout => None,
+        }
+    }
+}
+
+/// Bounded `Pool::get_conn`, so a saturated or unreachable pool cannot hang a request.
+pub async fn get_conn(pool: &Pool) -> Result<Conn, PoolError> {
+    match tokio::time::timeout(
+        Duration::from_secs(constants::DB_CONN_TIMEOUT_SECS),
+        pool.get_conn(),
+    )
+    .await
+    {
+        Ok(Ok(conn)) => Ok(conn),
+        Ok(Err(err)) => Err(PoolError::Db(err)),
+        Err(_) => Err(PoolError::Timeout),
+    }
+}
+
+impl From<PoolError> for AppError {
+    fn from(err: PoolError) -> Self {
+        match err {
+            PoolError::Timeout => AppError::service_unavailable("Database busy, try again later"),
+            PoolError::Db(err) => AppError::internal(anyhow::Error::new(err)),
+        }
+    }
+}
+
 /// Verifies `token` is valid and not idle-expired for `username`.
 pub async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Result<(), AppError> {
     //TODO: this could return user honestly
@@ -197,10 +252,7 @@ pub async fn verify_login_hash_blocking(
 /// One-time migration: rehashes accounts below CURRENT_PASSWORD_HASH_VERSION, then becomes a no-op.
 //TODO: remove this fn, password_hash_version, and its write in insert_user() once no account is below version 2.
 pub async fn rehash_legacy_password_hashes(pool: &Pool) -> anyhow::Result<()> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = get_conn(pool).await.context("Failed to get DB connection")?;
 
     let legacy_users = schema::User::select_outdated_password_hashes(
         &mut conn,
@@ -237,10 +289,7 @@ pub async fn rehash_legacy_password_hashes(pool: &Pool) -> anyhow::Result<()> {
 
 /// Loads the fake-salt HMAC key from the DB, creating it on first startup.
 pub async fn load_or_create_fake_salt_secret(pool: &Pool) -> anyhow::Result<()> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = get_conn(pool).await.context("Failed to get DB connection")?;
 
     let existing: Option<Vec<u8>> = conn
         .exec_first(
@@ -450,6 +499,15 @@ mod tests {
         assert_eq!(salt_auth.len(), 22);
         assert!(SaltString::from_b64(&salt_auth).is_ok());
         assert!(SaltString::from_b64(&salt_server_auth).is_ok());
+    }
+
+    // --- get_conn ---
+
+    #[test]
+    fn pool_timeout_maps_to_503_with_retry_after() {
+        let err: AppError = PoolError::Timeout.into();
+        assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(err.retry_after, Some(1));
     }
 
     // --- argon2 limiter ---

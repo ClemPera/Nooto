@@ -140,8 +140,7 @@ async fn main() -> anyhow::Result<()> {
             .as_str(),
     );
 
-    let mut conn = pool
-        .get_conn()
+    let mut conn = utils::get_conn(&pool)
         .await
         .context("Failed to get DB connection for migrations")?;
 
@@ -258,10 +257,7 @@ async fn send_notes(
     State(pool): State<Pool>,
     Json(sent_notes): Json<shared::SentNotes>,
 ) -> Result<Json<Vec<SentNotesResult>>, AppError> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     utils::user_verify(&mut conn, sent_notes.username.clone(), sent_notes.token).await?;
 
@@ -327,10 +323,7 @@ async fn select_notes(
     headers: HeaderMap,
     Query(params): Query<shared::SelectNotesParams>,
 ) -> Result<Json<Vec<shared::Note>>, AppError> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     let token = utils::bearer_token_from_headers(&headers)?;
 
@@ -362,10 +355,7 @@ async fn select_note(
     headers: HeaderMap,
     Query(params): Query<shared::SelectNoteParams>,
 ) -> Result<Json<shared::Note>, AppError> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     let token = utils::bearer_token_from_headers(&headers)?;
 
@@ -397,10 +387,7 @@ async fn insert_user(
     // Taken before get_conn: waiting logins must not hold a pooled connection while they wait.
     let _permit = utils::try_acquire_argon2_permit()?;
 
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     // Checked before hashing: a taken username must not cost an Argon2 run.
     if User::select(&mut conn, user.username.clone()).await?.is_some() {
@@ -415,10 +402,7 @@ async fn insert_user(
     user.stored_password_hash = utils::harden_login_hash_blocking(login_hash).await?;
     user.password_hash_version = constants::CURRENT_PASSWORD_HASH_VERSION;
 
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     user.insert(&mut conn).await.map_err(|err| {
         // A concurrent registration can still pass the check above and lose here.
@@ -439,10 +423,7 @@ async fn login_request(
     State(pool): State<Pool>,
     Query(params): Query<shared::LoginRequestParams>,
 ) -> Result<Json<shared::LoginRequest>, AppError> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     // Fake salts for unknown usernames so the endpoint can't confirm account existence (CWE-203).
     let (salt_auth, salt_server_auth) =
@@ -470,10 +451,7 @@ async fn login(
     // Taken before get_conn: waiting logins must not hold a pooled connection while they wait.
     let _permit = utils::try_acquire_argon2_permit()?;
 
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     let user = schema::User::select(&mut conn, params.username)
         .await
@@ -516,10 +494,7 @@ async fn login(
         last_used_at: chrono::Local::now().to_utc().timestamp(),
     };
 
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     user_token.insert(&mut conn).await.map_err(AppError::from)?;
 
@@ -536,10 +511,7 @@ async fn logout(
     State(pool): State<Pool>,
     Json(params): Json<shared::LogoutParams>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     utils::user_verify(&mut conn, params.username.clone(), params.token.clone()).await?;
 
