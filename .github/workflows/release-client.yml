@@ -28,9 +28,9 @@ jobs:
 
           - runner: macos-latest
             os: macos
-            arch: universal
-            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
-            tauri-args: '--target universal-apple-darwin'
+            arch: aarch64
+            tauri-args: '--target aarch64-apple-darwin'
+            target-dir: 'aarch64-apple-darwin'
             binary: nooto
 
           - runner: windows-latest
@@ -95,12 +95,10 @@ jobs:
 
       - name: Create binary archive
         shell: bash
+        env:
+          TARGET_DIR: ${{ matrix.target-dir }}
         run: |
-          if [ "${{ matrix.os }}" = "macos" ]; then
-            BIN_PATH="target/universal-apple-darwin/release/${{ matrix.binary }}"
-          else
-            BIN_PATH="target/release/${{ matrix.binary }}"
-          fi
+          BIN_PATH="target/${TARGET_DIR:+$TARGET_DIR/}release/${{ matrix.binary }}"
           ARCHIVE="nooto-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz"
           tar -czf "$ARCHIVE" -C "$(dirname "$BIN_PATH")" "$(basename "$BIN_PATH")"
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"

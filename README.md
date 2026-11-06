@@ -70,7 +70,7 @@ Download the latest installer for your platform from the [Releases](https://gith
 |---|---|
 | Linux x86_64 | `.deb`, `.rpm`, `.AppImage` |
 | Linux aarch64 | `.deb`, `.rpm`, `.AppImage` |
-| macOS (universal) | `.dmg` |
+| macOS aarch64 | `.dmg` |
 | Windows x86_64 | `.msi`, `.exe` |
 | Android | `.apk` |
 
