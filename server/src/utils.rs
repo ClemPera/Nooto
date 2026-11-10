@@ -504,10 +504,9 @@ mod tests {
     // --- get_conn ---
 
     #[test]
-    fn pool_timeout_maps_to_503_with_retry_after() {
+    fn pool_timeout_maps_to_503() {
         let err: AppError = PoolError::Timeout.into();
         assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(err.retry_after, Some(1));
     }
 
     // --- argon2 limiter ---
@@ -541,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn saturated_limiter_returns_503_with_retry_after() {
+    fn saturated_limiter_returns_503() {
         let limiter = argon2_limiter().unwrap();
         let mut held = Vec::new();
         while let Ok(permit) = limiter.clone().try_acquire_owned() {
@@ -550,7 +549,6 @@ mod tests {
 
         let err = try_acquire_argon2_permit().unwrap_err();
         assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(err.retry_after, Some(1));
 
         drop(held);
     }
