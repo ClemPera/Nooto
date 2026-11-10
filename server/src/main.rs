@@ -132,10 +132,15 @@ impl From<anyhow::Error> for AppError {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    dotenv().ok();
+    // A malformed .env silently drops variables, so report it instead of failing later.
+    if let Err(err) = dotenv()
+        && !err.not_found()
+    {
+        eprintln!("Warning: could not load .env: {err}");
+    }
     //Env var should be like mysql://user:pass%20word@localhost/database_name
     let pool = Pool::new(
-        dotenvy::var("DATABASE_URL")
+        std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set")
             .as_str(),
     );

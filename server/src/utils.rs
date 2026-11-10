@@ -70,9 +70,9 @@ fn argon2_limiter() -> Result<Arc<Semaphore>, AppError> {
 }
 
 fn argon2_permits_from_env() -> anyhow::Result<usize> {
-    let raw = match dotenvy::var(ARGON2_MEMORY_ENV) {
+    let raw = match std::env::var(ARGON2_MEMORY_ENV) {
         Ok(raw) => Some(raw),
-        Err(dotenvy::Error::EnvVar(std::env::VarError::NotPresent)) => None,
+        Err(std::env::VarError::NotPresent) => None,
         Err(err) => {
             return Err(anyhow::Error::new(err).context(format!("Invalid {ARGON2_MEMORY_ENV}")))
         }

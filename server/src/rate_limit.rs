@@ -94,9 +94,9 @@ pub fn parse_trusted_proxies(raw: &str) -> anyhow::Result<Vec<IpNet>> {
 
 /// Reads `NOOTO_TRUSTED_PROXIES`: unset or empty means the local defaults, `none` means no trust.
 pub fn trusted_proxies_from_env() -> anyhow::Result<Vec<IpNet>> {
-    let raw = match dotenvy::var(TRUSTED_PROXIES_ENV) {
+    let raw = match std::env::var(TRUSTED_PROXIES_ENV) {
         Ok(raw) => raw,
-        Err(dotenvy::Error::EnvVar(std::env::VarError::NotPresent)) => {
+        Err(std::env::VarError::NotPresent) => {
             return default_trusted_proxies();
         }
         Err(err) => {
