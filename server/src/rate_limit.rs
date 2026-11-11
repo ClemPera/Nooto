@@ -6,7 +6,6 @@ use std::sync::Arc;
 use anyhow::Context;
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Request};
-use forwarded_header_value::ForwardedHeaderValue;
 use ipnet::IpNet;
 use tower_governor::errors::GovernorError;
 use tower_governor::key_extractor::KeyExtractor;
@@ -152,20 +151,6 @@ fn forwarded_chain(headers: &HeaderMap) -> Vec<IpAddr> {
         .and_then(parse_ip)
     {
         chain.push(ip);
-        return chain;
-    }
-
-    for value in headers.get_all("forwarded") {
-        let Ok(value) = value.to_str() else { continue };
-        let Ok(stanzas) = ForwardedHeaderValue::from_forwarded(value) else {
-            continue;
-        };
-
-        for stanza in stanzas.iter() {
-            if let Some(ip) = stanza.forwarded_for_ip() {
-                chain.push(normalize_ip(ip));
-            }
-        }
     }
 
     chain
@@ -222,15 +207,9 @@ mod tests {
     }
 
     #[test]
-    fn untrusted_peer_ignores_x_real_ip_and_forwarded() {
+    fn untrusted_peer_ignores_x_real_ip() {
         let extractor = extractor("10.0.0.0/8");
-        let request = request(
-            "198.51.100.7:1234",
-            &[
-                ("x-real-ip", "203.0.113.1"),
-                ("forwarded", "for=203.0.113.2"),
-            ],
-        );
+        let request = request("198.51.100.7:1234", &[("x-real-ip", "203.0.113.1")]);
 
         assert_eq!(extractor.extract(&request).unwrap(), ip("198.51.100.7"));
     }
@@ -292,7 +271,6 @@ mod tests {
             &[
                 ("x-forwarded-for", "203.0.113.5"),
                 ("x-real-ip", "203.0.113.6"),
-                ("forwarded", "for=203.0.113.7"),
             ],
         );
 
@@ -302,23 +280,9 @@ mod tests {
     #[test]
     fn x_real_ip_is_used_when_x_forwarded_for_is_absent() {
         let extractor = extractor("127.0.0.0/8");
-        let request = request(
-            "127.0.0.1:1234",
-            &[
-                ("x-real-ip", "203.0.113.6"),
-                ("forwarded", "for=203.0.113.7"),
-            ],
-        );
+        let request = request("127.0.0.1:1234", &[("x-real-ip", "203.0.113.6")]);
 
         assert_eq!(extractor.extract(&request).unwrap(), ip("203.0.113.6"));
-    }
-
-    #[test]
-    fn forwarded_header_is_used_as_a_last_resort() {
-        let extractor = extractor("127.0.0.0/8");
-        let request = request("127.0.0.1:1234", &[("forwarded", "for=203.0.113.7")]);
-
-        assert_eq!(extractor.extract(&request).unwrap(), ip("203.0.113.7"));
     }
 
     #[test]

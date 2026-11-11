@@ -3052,7 +3052,6 @@ dependencies = [
  "axum",
  "chrono",
  "dotenvy",
- "forwarded-header-value",
  "hex",
  "hmac",
  "ipnet",

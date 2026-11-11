@@ -156,7 +156,7 @@ export DATABASE_URL=mysql://nooto:password@localhost:3306/nooto
 
 **3. Run behind a reverse proxy**
 
-The login and account-creation endpoints are rate limited per client IP. Behind a proxy, the server only reads `X-Forwarded-For`, `X-Real-IP`, and `Forwarded` when the direct peer is trusted, so the proxy address must be covered by `NOOTO_TRUSTED_PROXIES`.
+The login and account-creation endpoints are rate limited per client IP. Behind a proxy, the server only reads `X-Forwarded-For` and `X-Real-IP` when the direct peer is trusted, so the proxy address must be covered by `NOOTO_TRUSTED_PROXIES`.
 
 By default the trusted ranges are loopback, private networks, and link-local addresses:
 
