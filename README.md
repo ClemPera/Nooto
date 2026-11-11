@@ -181,7 +181,7 @@ location / {
 
 Caddy discards a client-supplied `X-Forwarded-For` by default and sets its own, so only Caddy's address needs to be trusted. If another proxy or CDN sits in front of Caddy, add its ranges to Caddy's `trusted_proxies` as well.
 
-`NOOTO_ARGON2_MEMORY_MIB` caps the memory used by concurrent password hashing. The default, 256 MiB, allows 13 concurrent hashes at 19 MiB each. When every slot is busy, login and account creation return `503` with `Retry-After: 1`, so lower the value on a small VPS but keep it at least 19.
+`NOOTO_ARGON2_MEMORY_MIB` caps the memory used by concurrent password hashing. The default, 256 MiB, allows 13 concurrent hashes at 19 MiB each. When every slot is busy, login and account creation return `503` instead of queueing, so lower the value on a small VPS but keep it at least 19.
 
 **4. Connect the client**
 
