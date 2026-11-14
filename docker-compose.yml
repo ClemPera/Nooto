@@ -23,6 +23,8 @@ services:
       - "${SERVER_PORT:-3000}:3000"
     environment:
       DATABASE_URL: mysql://${MARIADB_USER}:${MARIADB_PASSWORD}@db:3306/${MARIADB_DATABASE}
+      NOOTO_ARGON2_MEMORY_MIB: ${NOOTO_ARGON2_MEMORY_MIB:-256}
+      NOOTO_TRUSTED_PROXIES: ${NOOTO_TRUSTED_PROXIES:-}
     depends_on:
       db:
         condition: service_healthy

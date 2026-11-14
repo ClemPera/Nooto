@@ -1,4 +1,3 @@
-use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -15,14 +14,16 @@ use dotenvy::dotenv;
 use mysql_async::Pool;
 use rand::{TryRng, rngs::SysRng};
 use shared::SentNotesResult;
-use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor};
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 
+use crate::rate_limit::TrustedProxyIpKeyExtractor;
 use crate::schema::User;
 
 mod utils;
 mod schema;
 mod migrations;
 mod constants;
+mod rate_limit;
 
 /// Application error returned by all handlers.
 /// Internal errors are logged server-side and return a generic 500 to the client.
@@ -45,17 +46,26 @@ impl AppError {
 
     /// 404 with a caller-supplied message.
     pub fn not_found(msg: impl Into<String>) -> Self {
-        AppError { status: StatusCode::NOT_FOUND, message: msg.into() }
+        AppError {
+            status: StatusCode::NOT_FOUND,
+            message: msg.into(),
+        }
     }
 
     /// 401 with a caller-supplied message.
     pub fn unauthorized(msg: impl Into<String>) -> Self {
-        AppError { status: StatusCode::UNAUTHORIZED, message: msg.into() }
+        AppError {
+            status: StatusCode::UNAUTHORIZED,
+            message: msg.into(),
+        }
     }
 
     /// 403 — used when the token is present but doesn't match.
     pub fn forbidden() -> Self {
-        AppError { status: StatusCode::FORBIDDEN, message: "Forbidden".to_string() }
+        AppError {
+            status: StatusCode::FORBIDDEN,
+            message: "Forbidden".to_string(),
+        }
     }
 
     /// 422 — used when an expected entity (e.g. the user record) is missing mid-request.
@@ -65,15 +75,29 @@ impl AppError {
             message: "Unprocessable entity".to_string(),
         }
     }
-    
+
     /// 409 — used when a resource already exists (e.g. duplicate username).
     pub fn conflict(msg: impl Into<String>) -> Self {
-        AppError { status: StatusCode::CONFLICT, message: msg.into() }
+        AppError {
+            status: StatusCode::CONFLICT,
+            message: msg.into(),
+        }
     }
 
     /// 400 with a caller-supplied message (e.g. malformed token).
     pub fn bad_request(msg: impl Into<String>) -> Self {
-        AppError { status: StatusCode::BAD_REQUEST, message: msg.into() }
+        AppError {
+            status: StatusCode::BAD_REQUEST,
+            message: msg.into(),
+        }
+    }
+
+    /// 503 — a shared resource is saturated; the client should retry later.
+    pub fn service_unavailable(msg: impl Into<String>) -> Self {
+        AppError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: msg.into(),
+        }
     }
 }
 
@@ -91,16 +115,20 @@ impl From<anyhow::Error> for AppError {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    dotenv().ok();
+    // A malformed .env silently drops variables, so report it instead of failing later.
+    if let Err(err) = dotenv()
+        && !err.not_found()
+    {
+        eprintln!("Warning: could not load .env: {err}");
+    }
     //Env var should be like mysql://user:pass%20word@localhost/database_name
     let pool = Pool::new(
-        env::var("DATABASE_URL")
+        std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set")
             .as_str(),
     );
 
-    let mut conn = pool
-        .get_conn()
+    let mut conn = utils::get_conn(&pool)
         .await
         .context("Failed to get DB connection for migrations")?;
 
@@ -121,6 +149,8 @@ async fn main() -> anyhow::Result<()> {
     utils::init_dummy_login_hash()
         .context("Failed to initialise dummy login hash")?;
 
+    utils::init_argon2_limiter()?;
+
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
         .expect("Failed to bind TCP listener");
@@ -140,7 +170,7 @@ fn app(pool: Pool) -> anyhow::Result<Router> {
     // Rate-limited below: /login and /create_account are what an attacker would brute-force.
     let auth_governor_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .key_extractor(SmartIpKeyExtractor)
+            .key_extractor(TrustedProxyIpKeyExtractor::from_env()?)
             .per_second(4)
             .burst_size(5)
             .finish()
@@ -215,10 +245,7 @@ async fn send_notes(
     State(pool): State<Pool>,
     Json(sent_notes): Json<shared::SentNotes>,
 ) -> Result<Json<Vec<SentNotesResult>>, AppError> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     utils::user_verify(&mut conn, sent_notes.username.clone(), sent_notes.token).await?;
 
@@ -284,10 +311,7 @@ async fn select_notes(
     headers: HeaderMap,
     Query(params): Query<shared::SelectNotesParams>,
 ) -> Result<Json<Vec<shared::Note>>, AppError> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     let token = utils::bearer_token_from_headers(&headers)?;
 
@@ -319,10 +343,7 @@ async fn select_note(
     headers: HeaderMap,
     Query(params): Query<shared::SelectNoteParams>,
 ) -> Result<Json<shared::Note>, AppError> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     let token = utils::bearer_token_from_headers(&headers)?;
 
@@ -351,20 +372,25 @@ async fn insert_user(
     println!("received insert_user");
     let mut user: schema::User = user.into();
 
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    // Taken before get_conn: waiting logins must not hold a pooled connection while they wait.
+    let _permit = utils::try_acquire_argon2_permit()?;
+
+    let mut conn = utils::get_conn(&pool).await?;
 
     // Checked before hashing: a taken username must not cost an Argon2 run.
     if User::select(&mut conn, user.username.clone()).await?.is_some() {
         return Err(AppError::conflict("This username already exist"))
     }
 
+    // Release the pooled connection while Argon2 runs, so hashing never pins a slot.
+    drop(conn);
+
     // Argon2 blocks for tens of ms; keep it off the async workers.
     let login_hash = std::mem::take(&mut user.stored_password_hash);
     user.stored_password_hash = utils::harden_login_hash_blocking(login_hash).await?;
     user.password_hash_version = constants::CURRENT_PASSWORD_HASH_VERSION;
+
+    let mut conn = utils::get_conn(&pool).await?;
 
     user.insert(&mut conn).await.map_err(|err| {
         // A concurrent registration can still pass the check above and lose here.
@@ -385,10 +411,7 @@ async fn login_request(
     State(pool): State<Pool>,
     Query(params): Query<shared::LoginRequestParams>,
 ) -> Result<Json<shared::LoginRequest>, AppError> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     // Fake salts for unknown usernames so the endpoint can't confirm account existence (CWE-203).
     let (salt_auth, salt_server_auth) =
@@ -413,14 +436,17 @@ async fn login(
     State(pool): State<Pool>,
     Json(params): Json<shared::LoginParams>,
 ) -> Result<Json<shared::Login>, AppError> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    // Taken before get_conn: waiting logins must not hold a pooled connection while they wait.
+    let _permit = utils::try_acquire_argon2_permit()?;
+
+    let mut conn = utils::get_conn(&pool).await?;
 
     let user = schema::User::select(&mut conn, params.username)
         .await
         .map_err(AppError::from)?;
+
+    // Release the pooled connection while Argon2 runs, so hashing never pins a slot.
+    drop(conn);
 
     // Same response for missing user and wrong password to avoid enumeration (CWE-203).
     let user = match user {
@@ -456,6 +482,8 @@ async fn login(
         last_used_at: chrono::Local::now().to_utc().timestamp(),
     };
 
+    let mut conn = utils::get_conn(&pool).await?;
+
     user_token.insert(&mut conn).await.map_err(AppError::from)?;
 
     Ok(Json(shared::Login {
@@ -471,10 +499,7 @@ async fn logout(
     State(pool): State<Pool>,
     Json(params): Json<shared::LogoutParams>,
 ) -> Result<StatusCode, AppError> {
-    let mut conn = pool
-        .get_conn()
-        .await
-        .context("Failed to get DB connection")?;
+    let mut conn = utils::get_conn(&pool).await?;
 
     utils::user_verify(&mut conn, params.username.clone(), params.token.clone()).await?;
 
@@ -548,6 +573,13 @@ mod tests {
         let e = AppError::bad_request("invalid input");
         assert_eq!(e.status, StatusCode::BAD_REQUEST);
         assert_eq!(e.message, "invalid input");
+    }
+
+    #[test]
+    fn app_error_service_unavailable() {
+        let e = AppError::service_unavailable("busy");
+        assert_eq!(e.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(e.message, "busy");
     }
 
     // --- From<anyhow::Error> ---

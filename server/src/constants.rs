@@ -6,3 +6,6 @@ pub const SESSION_TOKEN_REFRESH_AFTER_SECS: i64 = 60 * 60 * 24;
 
 /// Password hash format; see schema::User::password_hash_version.
 pub const CURRENT_PASSWORD_HASH_VERSION: u8 = 2;
+
+/// Maximum time a request waits for a pooled DB connection before failing.
+pub const DB_CONN_TIMEOUT_SECS: u64 = 5;

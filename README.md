@@ -121,6 +121,13 @@ MARIADB_PASSWORD=a_strong_password
 
 # Port exposed on the host (default: 3000)
 SERVER_PORT=3000
+
+# Memory budget shared by concurrent password hashes, in MiB (default: 256)
+NOOTO_ARGON2_MEMORY_MIB=256
+
+# Comma-separated proxy IPs or CIDRs allowed to set client IP headers.
+# Leave empty to trust loopback and private ranges.
+NOOTO_TRUSTED_PROXIES=
 ```
 
 **2. Start the stack**
@@ -147,7 +154,36 @@ export DATABASE_URL=mysql://nooto:password@localhost:3306/nooto
 ./target/release/nooto-server
 ```
 
-**3. Connect the client**
+**3. Run behind a reverse proxy**
+
+The login and account-creation endpoints are rate limited per client IP. Behind a proxy, the server only reads `X-Forwarded-For` and `X-Real-IP` when the direct peer is trusted, so the proxy address must be covered by `NOOTO_TRUSTED_PROXIES`.
+
+By default the trusted ranges are loopback, private networks, and link-local addresses:
+
+- `127.0.0.0/8` and `::1/128`
+- `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
+- `169.254.0.0/16`, `fc00::/7`, `fe80::/10`
+
+That covers a proxy on the same host, on the LAN, or in the Docker bridge network. Set `NOOTO_TRUSTED_PROXIES` to a comma-separated list of IPs or CIDRs to replace the defaults, or to `none` to ignore forwarding headers entirely. Trusting `0.0.0.0/0` or `::/0` is accepted but removes the protection, since any client can then set its own rate-limit key.
+
+If the proxy is not trusted, every client shares one rate-limit bucket. If clients on a trusted private network can reach the server directly, they can spoof these headers; in that case narrow the list to the proxy address only.
+
+The proxy must overwrite the client headers instead of forwarding what the client sent. With nginx:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Real-IP $remote_addr;
+}
+```
+
+Caddy discards a client-supplied `X-Forwarded-For` by default and sets its own, so only Caddy's address needs to be trusted. If another proxy or CDN sits in front of Caddy, add its ranges to Caddy's `trusted_proxies` as well.
+
+`NOOTO_ARGON2_MEMORY_MIB` caps the memory used by concurrent password hashing. The default, 256 MiB, allows 13 concurrent hashes at 19 MiB each. When every slot is busy, login and account creation return `503` instead of queueing, so lower the value on a small VPS but keep it at least 19.
+
+**4. Connect the client**
 
 When creating an account or logging in, open **Advanced settings** and enter your server URL.
 
