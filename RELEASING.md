@@ -24,3 +24,7 @@ Tag and push, nothing else is needed:
 git tag server-vX.Y.Z
 git push origin main server-vX.Y.Z
 ```
+
+## Protocol changes
+
+Bump `PROTOCOL_VERSION` only for breaking changes to paths, payloads, auth, or semantics; the server accepts exactly that version and rejects older clients. Most releases must not bump it.
