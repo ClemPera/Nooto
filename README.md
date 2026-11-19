@@ -16,6 +16,9 @@
 > **Beta software**: Nooto is functional but still in active development. Expect rough edges.  
 > **Security notice**: The encryption design has not been audited by an independent security expert. Use at your own discretion.
 
+> [!WARNING]
+> Client v0.3.0 and server v0.2.0 must be upgraded together. Upgrading only one side causes a non-destructive login and sync error; a future release will handle mismatches gracefully.
+
 ---
 
 ## Overview
