@@ -64,3 +64,21 @@ pub async fn login(username: String, password: String, instance: String) -> Resu
 
     operations::login(login_params, instance).await
 }
+
+/// Revokes the workspace's server session in the background; failures are logged and ignored.
+pub fn revoke_session(workspace: &Workspace) {
+    let (Some(username), Some(token), Some(instance)) = (
+        workspace.username.clone(),
+        workspace.token.clone(),
+        workspace.instance.clone(),
+    ) else {
+        return;
+    };
+
+    tokio::spawn(async move {
+        let params = shared::LogoutParams { username, token };
+        if let Err(error) = operations::logout(params, instance).await {
+            trace!("could not revoke server session: {error:#}");
+        }
+    });
+}
