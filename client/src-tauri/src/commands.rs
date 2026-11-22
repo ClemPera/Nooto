@@ -418,7 +418,7 @@ pub async fn sync_login(
 ) -> Result<(), CommandError> {
     trace!("login command received");
 
-    let instance: String = instance.context("Instance url is empty")?;
+    let instance = sync::normalize_instance(&instance.context("Instance url is empty")?)?;
 
     sync::version::ensure_server_compatible(&instance).await?;
 

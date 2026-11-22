@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use shared::{ProtocolCompatibility, ProtocolMismatch, ServerInfo};
 
-pub async fn fetch_server_info(instance: &str) -> Result<ServerInfo> {
-    let client = reqwest::Client::new();
+use super::ApiClient;
 
-    let response = client
-        .get(format!("{instance}/version"))
+pub async fn fetch_server_info(instance: &str) -> Result<ServerInfo> {
+    let response = ApiClient::new(instance)?
+        .get("/version")
         .send()
         .await
         .context("Could not reach the server")?
@@ -23,22 +23,14 @@ pub async fn ensure_server_compatible(instance: &str) -> Result<ServerInfo> {
     let info = match fetch_server_info(instance).await {
         Ok(info) => info,
         Err(e) if is_not_found(&e) => {
-            return Err(ProtocolMismatch::new(
-                Some(shared::PROTOCOL_VERSION),
-                None,
-            )
-            .into());
+            return Err(ProtocolMismatch::new(Some(shared::PROTOCOL_VERSION), None).into());
         }
         Err(e) => return Err(e),
     };
 
     match info.check_client(shared::PROTOCOL_VERSION) {
         ProtocolCompatibility::Compatible => Ok(info),
-        _ => Err(ProtocolMismatch::new(
-            Some(shared::PROTOCOL_VERSION),
-            Some(info),
-        )
-        .into()),
+        _ => Err(ProtocolMismatch::new(Some(shared::PROTOCOL_VERSION), Some(info)).into()),
     }
 }
 
