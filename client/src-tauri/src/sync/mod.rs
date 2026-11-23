@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use tauri_plugin_log::log::trace;
+use tauri_plugin_log::log::{trace, warn};
 
 use crate::{crypt, db::schema::Workspace};
 
@@ -78,7 +78,7 @@ pub fn revoke_session(workspace: &Workspace) {
     tokio::spawn(async move {
         let params = shared::LogoutParams { username, token };
         if let Err(error) = operations::logout(params, instance).await {
-            trace!("could not revoke server session: {error:#}");
+            warn!("could not revoke server session: {error:#}");
         }
     });
 }
