@@ -112,6 +112,18 @@ pub async fn login_request(
         .context("Failed to parse login request response")
 }
 
+/// `POST /logout` — revokes the session token.
+pub async fn logout(params: shared::LogoutParams, instance: String) -> Result<()> {
+    ApiClient::new(&instance)?
+        .post("/logout")
+        .json(&params)
+        .send()
+        .await
+        .context("Could not reach the server to revoke the session")?;
+
+    Ok(())
+}
+
 /// `POST /login` — submits the login hash and returns the session token and MEK material.
 pub async fn login(params: shared::LoginParams, instance: String) -> Result<shared::Login> {
     let response = ApiClient::new(&instance)?

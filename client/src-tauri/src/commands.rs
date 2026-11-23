@@ -506,6 +506,14 @@ pub async fn clear_session(state: &Mutex<AppState>) -> Result<(), CommandError> 
 /// Clears server credentials (token, instance, username) from the workspace without deleting notes.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
+    let workspace = state
+        .lock()
+        .await
+        .workspace
+        .clone()
+        .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
+
+    sync::revoke_session(&workspace);
     clear_session(&state).await
 }
 
@@ -514,13 +522,15 @@ pub async fn sync_logout(state: State<'_, Mutex<AppState>>) -> Result<(), Comman
 pub async fn logout(state: State<'_, Mutex<AppState>>) -> Result<(), CommandError> {
     let mut state = state.lock().await;
 
+    let workspace = state
+        .workspace
+        .clone()
+        .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
+
+    sync::revoke_session(&workspace);
+
     {
         let conn = state.database.lock().await;
-        let workspace = state
-            .workspace
-            .clone()
-            .ok_or_else(|| CommandError::unauthorized("No workspace is loaded"))?;
-
         db::operations::logout_workspace(&conn, workspace.workspace_name)?;
     }
 

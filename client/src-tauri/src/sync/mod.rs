@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use tauri_plugin_log::log::trace;
+use tauri_plugin_log::log::{trace, warn};
 
 use crate::{crypt, db::schema::Workspace};
 
@@ -63,4 +63,22 @@ pub async fn login(username: String, password: String, instance: String) -> Resu
     };
 
     operations::login(login_params, instance).await
+}
+
+/// Revokes the workspace's server session in the background; failures are logged and ignored.
+pub fn revoke_session(workspace: &Workspace) {
+    let (Some(username), Some(token), Some(instance)) = (
+        workspace.username.clone(),
+        workspace.token.clone(),
+        workspace.instance.clone(),
+    ) else {
+        return;
+    };
+
+    tokio::spawn(async move {
+        let params = shared::LogoutParams { username, token };
+        if let Err(error) = operations::logout(params, instance).await {
+            warn!("could not revoke server session: {error:#}");
+        }
+    });
 }
