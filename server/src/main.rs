@@ -60,19 +60,11 @@ impl AppError {
         }
     }
 
-    /// 403 — used when the token is present but doesn't match.
-    pub fn forbidden() -> Self {
+    /// 403 with a caller-supplied message (e.g. an expired session token).
+    pub fn forbidden(msg: impl Into<String>) -> Self {
         AppError {
             status: StatusCode::FORBIDDEN,
-            message: "Forbidden".to_string(),
-        }
-    }
-
-    /// 422 — used when an expected entity (e.g. the user record) is missing mid-request.
-    pub fn unprocessable() -> Self {
-        AppError {
-            status: StatusCode::UNPROCESSABLE_ENTITY,
-            message: "Unprocessable entity".to_string(),
+            message: msg.into(),
         }
     }
 
@@ -247,12 +239,7 @@ async fn send_notes(
 ) -> Result<Json<Vec<SentNotesResult>>, AppError> {
     let mut conn = utils::get_conn(&pool).await?;
 
-    utils::user_verify(&mut conn, sent_notes.username.clone(), sent_notes.token).await?;
-
-    let user = User::select(&mut conn, sent_notes.username)
-        .await
-        .map_err(AppError::from)?
-        .ok_or_else(AppError::unprocessable)?;
+    let user = utils::user_verify(&mut conn, sent_notes.username, sent_notes.token).await?;
 
     let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
 
@@ -315,12 +302,7 @@ async fn select_notes(
 
     let token = utils::bearer_token_from_headers(&headers)?;
 
-    utils::user_verify(&mut conn, params.username.clone(), token).await?;
-
-    let user = User::select(&mut conn, params.username)
-        .await
-        .map_err(AppError::from)?
-        .ok_or_else(AppError::unprocessable)?;
+    let user = utils::user_verify(&mut conn, params.username, token).await?;
 
     let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
 
@@ -347,12 +329,7 @@ async fn select_note(
 
     let token = utils::bearer_token_from_headers(&headers)?;
 
-    utils::user_verify(&mut conn, params.username.clone(), token).await?;
-
-    let user = User::select(&mut conn, params.username)
-        .await
-        .map_err(AppError::from)?
-        .ok_or_else(AppError::unprocessable)?;
+    let user = utils::user_verify(&mut conn, params.username, token).await?;
 
     let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
 
@@ -501,12 +478,7 @@ async fn logout(
 ) -> Result<StatusCode, AppError> {
     let mut conn = utils::get_conn(&pool).await?;
 
-    utils::user_verify(&mut conn, params.username.clone(), params.token.clone()).await?;
-
-    let user = User::select(&mut conn, params.username)
-        .await
-        .map_err(AppError::from)?
-        .ok_or_else(AppError::unprocessable)?;
+    let user = utils::user_verify(&mut conn, params.username, params.token.clone()).await?;
 
     let user_id = user.id.ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
 
@@ -550,15 +522,9 @@ mod tests {
 
     #[test]
     fn app_error_forbidden() {
-        let e = AppError::forbidden();
+        let e = AppError::forbidden("expired");
         assert_eq!(e.status, StatusCode::FORBIDDEN);
-        assert_eq!(e.message, "Forbidden");
-    }
-
-    #[test]
-    fn app_error_unprocessable() {
-        let e = AppError::unprocessable();
-        assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(e.message, "expired");
     }
 
     #[test]

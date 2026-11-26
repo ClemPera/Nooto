@@ -30,6 +30,12 @@ const MIB_PER_HASH: usize = argon2::Params::DEFAULT_M_COST as usize / 1024;
 /// Memory budget, in MiB, used when `NOOTO_ARGON2_MEMORY_MIB` is unset.
 const DEFAULT_ARGON2_MEMORY_MIB: usize = 256;
 
+/// Returned for an unknown username or a token that matches no stored session.
+const INVALID_SESSION: &str = "Invalid username or token";
+
+/// Returned for a real but idle-expired token, only reachable by presenting that token.
+const EXPIRED_SESSION: &str = "Session expired, please log in again";
+
 static FAKE_SALT_SECRET: OnceLock<Vec<u8>> = OnceLock::new();
 static DUMMY_LOGIN_HASH: OnceLock<String> = OnceLock::new();
 static ARGON2_LIMITER: OnceLock<Result<Arc<Semaphore>, String>> = OnceLock::new();
@@ -157,17 +163,19 @@ impl From<PoolError> for AppError {
     }
 }
 
-/// Verifies `token` is valid and not idle-expired for `username`.
-pub async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Result<(), AppError> {
-    //TODO: this could return user honestly
+/// Verifies `token` for `username` and returns the account.
+/// A missing account and a bad token are indistinguishable (CWE-203).
+pub async fn user_verify(
+    conn: &mut Conn,
+    username: String,
+    token: Vec<u8>,
+) -> Result<schema::User, AppError> {
     let user = schema::User::select(conn, username)
         .await
-        .map_err(AppError::from)?
-        .ok_or_else(AppError::unprocessable)?;
+        .map_err(AppError::from)?;
 
-    let user_id = user
-        .id
-        .ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
+    // id 0 is never assigned, so a missing account still costs the same token lookup.
+    let user_id = user.as_ref().and_then(|u| u.id).unwrap_or(0);
 
     let user_tokens = schema::UserToken::select(conn, user_id)
         .await
@@ -183,9 +191,7 @@ pub async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> R
                 schema::UserToken::delete(conn, user_id, &ut.token)
                     .await
                     .map_err(AppError::from)?;
-                return Err(AppError::unauthorized(
-                    "Session expired, please log in again",
-                ));
+                return Err(AppError::forbidden(EXPIRED_SESSION));
             }
 
             if idle_secs > constants::SESSION_TOKEN_REFRESH_AFTER_SECS {
@@ -194,11 +200,11 @@ pub async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> R
                     .map_err(AppError::from)?;
             }
 
-            return Ok(());
+            return user.ok_or_else(|| AppError::unauthorized(INVALID_SESSION));
         }
     }
 
-    Err(AppError::forbidden())
+    Err(AppError::unauthorized(INVALID_SESSION))
 }
 
 /// Re-hashes login_hash with a fresh salt (defense in depth against a DB leak).
