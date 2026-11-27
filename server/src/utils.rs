@@ -30,12 +30,6 @@ const MIB_PER_HASH: usize = argon2::Params::DEFAULT_M_COST as usize / 1024;
 /// Memory budget, in MiB, used when `NOOTO_ARGON2_MEMORY_MIB` is unset.
 const DEFAULT_ARGON2_MEMORY_MIB: usize = 256;
 
-/// Returned for an unknown username or a token that matches no stored session.
-const INVALID_SESSION: &str = "Invalid username or token";
-
-/// Returned for a real but idle-expired token, only reachable by presenting that token.
-const EXPIRED_SESSION: &str = "Session expired, please log in again";
-
 static FAKE_SALT_SECRET: OnceLock<Vec<u8>> = OnceLock::new();
 static DUMMY_LOGIN_HASH: OnceLock<String> = OnceLock::new();
 static ARGON2_LIMITER: OnceLock<Result<Arc<Semaphore>, String>> = OnceLock::new();
@@ -191,7 +185,7 @@ pub async fn user_verify(
                 schema::UserToken::delete(conn, user_id, &ut.token)
                     .await
                     .map_err(AppError::from)?;
-                return Err(AppError::forbidden(EXPIRED_SESSION));
+                return Err(AppError::unauthorized("Session expired, please log in again"));
             }
 
             if idle_secs > constants::SESSION_TOKEN_REFRESH_AFTER_SECS {
@@ -200,11 +194,11 @@ pub async fn user_verify(
                     .map_err(AppError::from)?;
             }
 
-            return user.ok_or_else(|| AppError::unauthorized(INVALID_SESSION));
+            return user.ok_or_else(|| AppError::unauthorized("Invalid username or token"));
         }
     }
 
-    Err(AppError::unauthorized(INVALID_SESSION))
+    Err(AppError::unauthorized("Invalid username or token"))
 }
 
 /// Re-hashes login_hash with a fresh salt (defense in depth against a DB leak).

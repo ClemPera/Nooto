@@ -60,14 +60,6 @@ impl AppError {
         }
     }
 
-    /// 403 with a caller-supplied message (e.g. an expired session token).
-    pub fn forbidden(msg: impl Into<String>) -> Self {
-        AppError {
-            status: StatusCode::FORBIDDEN,
-            message: msg.into(),
-        }
-    }
-
     /// 409 — used when a resource already exists (e.g. duplicate username).
     pub fn conflict(msg: impl Into<String>) -> Self {
         AppError {
@@ -518,13 +510,6 @@ mod tests {
         let e = AppError::unauthorized("bad credentials");
         assert_eq!(e.status, StatusCode::UNAUTHORIZED);
         assert_eq!(e.message, "bad credentials");
-    }
-
-    #[test]
-    fn app_error_forbidden() {
-        let e = AppError::forbidden("expired");
-        assert_eq!(e.status, StatusCode::FORBIDDEN);
-        assert_eq!(e.message, "expired");
     }
 
     #[test]
