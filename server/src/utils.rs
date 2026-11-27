@@ -157,17 +157,19 @@ impl From<PoolError> for AppError {
     }
 }
 
-/// Verifies `token` is valid and not idle-expired for `username`.
-pub async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> Result<(), AppError> {
-    //TODO: this could return user honestly
+/// Verifies `token` for `username` and returns the account.
+/// A missing account and a bad token are indistinguishable (CWE-203).
+pub async fn user_verify(
+    conn: &mut Conn,
+    username: String,
+    token: Vec<u8>,
+) -> Result<schema::User, AppError> {
     let user = schema::User::select(conn, username)
         .await
-        .map_err(AppError::from)?
-        .ok_or_else(AppError::unprocessable)?;
+        .map_err(AppError::from)?;
 
-    let user_id = user
-        .id
-        .ok_or_else(|| AppError::internal(anyhow::anyhow!("User has no ID")))?;
+    // id 0 is never assigned, so a missing account still costs the same token lookup.
+    let user_id = user.as_ref().and_then(|u| u.id).unwrap_or(0);
 
     let user_tokens = schema::UserToken::select(conn, user_id)
         .await
@@ -183,9 +185,7 @@ pub async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> R
                 schema::UserToken::delete(conn, user_id, &ut.token)
                     .await
                     .map_err(AppError::from)?;
-                return Err(AppError::unauthorized(
-                    "Session expired, please log in again",
-                ));
+                return Err(AppError::unauthorized("Session expired, please log in again"));
             }
 
             if idle_secs > constants::SESSION_TOKEN_REFRESH_AFTER_SECS {
@@ -194,11 +194,11 @@ pub async fn user_verify(conn: &mut Conn, username: String, token: Vec<u8>) -> R
                     .map_err(AppError::from)?;
             }
 
-            return Ok(());
+            return user.ok_or_else(|| AppError::unauthorized("Invalid username or token"));
         }
     }
 
-    Err(AppError::forbidden())
+    Err(AppError::unauthorized("Invalid username or token"))
 }
 
 /// Re-hashes login_hash with a fresh salt (defense in depth against a DB leak).
