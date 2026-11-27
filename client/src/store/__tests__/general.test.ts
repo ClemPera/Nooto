@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useGeneral, syncStatusEnum } from "../general";
+import { useGeneral, syncStatusEnum, ProtocolMismatch } from "../general";
 import { Note, Workspace } from "../../types";
 
 const mockWorkspace: Workspace = { id: 1, workspace_name: "test-ws" };
@@ -21,6 +21,7 @@ beforeEach(() => {
     allWorkspaces: [],
     notes: [],
     syncStatus: syncStatusEnum.Offline,
+    versionMismatch: null,
   });
 });
 
@@ -31,6 +32,7 @@ describe("useGeneral", () => {
     expect(state.allWorkspaces).toEqual([]);
     expect(state.notes).toEqual([]);
     expect(state.syncStatus).toBe(syncStatusEnum.Offline);
+    expect(state.versionMismatch).toBeNull();
   });
 
   it("sets and clears workspace", () => {
@@ -70,5 +72,26 @@ describe("useGeneral", () => {
 
     useGeneral.getState().setSyncStatus(syncStatusEnum.Error);
     expect(useGeneral.getState().syncStatus).toBe(syncStatusEnum.Error);
+
+    useGeneral.getState().setSyncStatus(syncStatusEnum.UpgradeRequired);
+    expect(useGeneral.getState().syncStatus).toBe(syncStatusEnum.UpgradeRequired);
+  });
+
+  it("sets and clears version mismatch", () => {
+    const mismatch: ProtocolMismatch = {
+      code: "protocol_mismatch",
+      client_outdated: true,
+      client_protocol_version: 1,
+      server: {
+        server_version: "0.2.0",
+        protocol_version: 2,
+      },
+    };
+
+    useGeneral.getState().setVersionMismatch(mismatch);
+    expect(useGeneral.getState().versionMismatch).toEqual(mismatch);
+
+    useGeneral.getState().setVersionMismatch(null);
+    expect(useGeneral.getState().versionMismatch).toBeNull();
   });
 });

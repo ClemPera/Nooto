@@ -1,10 +1,14 @@
-use anyhow::{Result, Context};
-use tauri_plugin_log::log::trace;
+use anyhow::{Context, Result};
+use tauri_plugin_log::log::{trace, warn};
 
 use crate::{crypt, db::schema::Workspace};
 
+mod client;
 pub mod operations;
 pub mod service;
+pub mod version;
+
+pub use client::{ApiClient, normalize_instance};
 
 /// Assembles the `shared::User` payload from workspace and account encryption data,
 /// then posts it to the server's `/create_account` endpoint.
@@ -14,7 +18,6 @@ pub async fn create_account(
     account: crypt::AccountEncryptionData,
     instance: Option<String>,
 ) -> Result<()> {
-
     let instance: String = instance.context("Instance url is empty")?;
 
     let send_user = shared::User {
@@ -59,6 +62,23 @@ pub async fn login(username: String, password: String, instance: String) -> Resu
         login_hash,
     };
 
-    operations::login(login_params, instance)
-        .await
+    operations::login(login_params, instance).await
+}
+
+/// Revokes the workspace's server session in the background; failures are logged and ignored.
+pub fn revoke_session(workspace: &Workspace) {
+    let (Some(username), Some(token), Some(instance)) = (
+        workspace.username.clone(),
+        workspace.token.clone(),
+        workspace.instance.clone(),
+    ) else {
+        return;
+    };
+
+    tokio::spawn(async move {
+        let params = shared::LogoutParams { username, token };
+        if let Err(error) = operations::logout(params, instance).await {
+            warn!("could not revoke server session: {error:#}");
+        }
+    });
 }

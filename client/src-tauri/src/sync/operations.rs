@@ -1,16 +1,22 @@
 use anyhow::{Context, Result};
 use shared::{LoginRequestParams, Note, SelectNoteParams, SelectNotesParams, SentNotes, User};
 
-/// `POST /notes` — uploads a batch of notes and returns per-note results (Ok or Conflict).
-pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared::SentNotesResult>> {
-    let client = reqwest::Client::new();
+use super::{ApiClient, version};
 
-    let response = client
-        .post(instance + "/notes")
+/// `POST /notes` — uploads a batch of notes and returns per-note results (Ok or Conflict).
+pub async fn send_notes(
+    notes: SentNotes,
+    instance: String,
+) -> Result<Vec<shared::SentNotesResult>> {
+    let response = ApiClient::new(&instance)?
+        .post("/notes")
         .json(&notes)
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server")?;
+
+    let response = version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Server rejected the notes")?;
 
@@ -21,15 +27,21 @@ pub async fn send_notes(notes: SentNotes, instance: String) -> Result<Vec<shared
 }
 
 /// `GET /notes` — fetches notes updated after the timestamp in `params`.
-pub async fn select_notes(params: SelectNotesParams, instance: String) -> Result<Vec<Note>> {
-    let client = reqwest::Client::new();
-
-    let response = client
-        .get(instance + "/notes")
+pub async fn select_notes(
+    params: SelectNotesParams,
+    token: &[u8],
+    instance: String,
+) -> Result<Vec<Note>> {
+    let response = ApiClient::new(&instance)?
+        .get("/notes")
         .query(&params)
+        .bearer_auth(hex::encode(token))
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server")?;
+
+    let response = version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Server rejected the notes request")?;
 
@@ -40,15 +52,17 @@ pub async fn select_notes(params: SelectNotesParams, instance: String) -> Result
 }
 
 /// `GET /note` — fetches a single note by UUID.
-pub async fn select_note(params: SelectNoteParams, instance: String) -> Result<Note> {
-    let client = reqwest::Client::new();
-
-    let response = client
-        .get(instance + "/note")
+pub async fn select_note(params: SelectNoteParams, token: &[u8], instance: String) -> Result<Note> {
+    let response = ApiClient::new(&instance)?
+        .get("/note")
         .query(&params)
+        .bearer_auth(hex::encode(token))
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server")?;
+
+    let response = version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Server rejected the note request")?;
 
@@ -60,14 +74,15 @@ pub async fn select_note(params: SelectNoteParams, instance: String) -> Result<N
 
 /// `POST /create_account` — registers a new user on the server.
 pub async fn create_account(user: User, instance: String) -> Result<()> {
-    let client = reqwest::Client::new();
-
-    client
-        .post(instance + "/create_account")
+    let response = ApiClient::new(&instance)?
+        .post("/create_account")
         .json(&user)
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server")?;
+
+    version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Server rejected account creation")?;
 
@@ -75,15 +90,19 @@ pub async fn create_account(user: User, instance: String) -> Result<()> {
 }
 
 /// `GET /login` — retrieves the salts needed to derive the login hash before authenticating.
-pub async fn login_request(params: LoginRequestParams, instance: String) -> Result<shared::LoginRequest> {
-    let client = reqwest::Client::new();
-
-    let response = client
-        .get(instance + "/login")
+pub async fn login_request(
+    params: LoginRequestParams,
+    instance: String,
+) -> Result<shared::LoginRequest> {
+    let response = ApiClient::new(&instance)?
+        .get("/login")
         .query(&params)
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server")?;
+
+    let response = version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Server rejected login request")?;
 
@@ -93,16 +112,29 @@ pub async fn login_request(params: LoginRequestParams, instance: String) -> Resu
         .context("Failed to parse login request response")
 }
 
-/// `POST /login` — submits the login hash and returns the session token and MEK material.
-pub async fn login(params: shared::LoginParams, instance: String) -> Result<shared::Login> {
-    let client = reqwest::Client::new();
-
-    let response = client
-        .post(instance + "/login")
+/// `POST /logout` — revokes the session token.
+pub async fn logout(params: shared::LogoutParams, instance: String) -> Result<()> {
+    ApiClient::new(&instance)?
+        .post("/logout")
         .json(&params)
         .send()
         .await
-        .context("Could not reach the server")?
+        .context("Could not reach the server to revoke the session")?;
+
+    Ok(())
+}
+
+/// `POST /login` — submits the login hash and returns the session token and MEK material.
+pub async fn login(params: shared::LoginParams, instance: String) -> Result<shared::Login> {
+    let response = ApiClient::new(&instance)?
+        .post("/login")
+        .json(&params)
+        .send()
+        .await
+        .context("Could not reach the server")?;
+
+    let response = version::reject_protocol_mismatch(response)
+        .await?
         .error_for_status()
         .context("Login failed")?;
 

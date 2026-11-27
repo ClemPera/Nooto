@@ -1,0 +1,45 @@
+[project]
+name = "nooto-server-versions"
+version = "0.1.0"
+description = "Snapshot and restore the Nooto server database and Docker images."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+dependencies = []
+
+[project.scripts]
+server-versions = "server_versions.cli:main"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.40.2",
+    "mypy>=1.18",
+    "pytest>=8.4",
+    "ruff>=0.14",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/server_versions"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PTH", "RET", "ARG"]
+ignore = ["ARG002"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+show_error_codes = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

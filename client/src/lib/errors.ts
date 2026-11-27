@@ -5,7 +5,8 @@ export type ErrorKind =
   | "not_found"
   | "unauthorized"
   | "network"
-  | "invalid_input";
+  | "invalid_input"
+  | "upgrade_required";
 
 export type CommandError = {
   kind: ErrorKind;
